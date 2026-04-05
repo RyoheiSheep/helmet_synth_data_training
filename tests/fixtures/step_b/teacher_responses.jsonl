@@ -1,0 +1,6 @@
+{"image_id": "img_001", "label": "tight", "rationale": "The chinstrap is visibly pulled snug under the chin."}
+{"image_id": "img_002", "label": "loose", "rationale": "The strap hangs below the chin with a visible gap."}
+{"image_id": "img_003", "label": "loose", "rationale": "The strap appears to have some slack near the buckle."}
+{"image_id": "img_004", "label": "loose", "rationale": "The chinstrap is unbuckled and dangling."}
+{"image_id": "img_005", "label": "tight", "rationale": "Buckle is fastened and strap contours the chin closely."}
+{"image_id": "img_006", "label": "tight", "rationale": "Strap is firmly secured against the jaw."}

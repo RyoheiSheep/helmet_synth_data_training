@@ -1,0 +1,17 @@
+[project]
+name = "helmet-synth-data-training"
+version = "0.1.0"
+description = "Helmet chinstrap VLM self-improvement pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,28 @@
+services:
+  step_a:
+    build: ./docker/step_a_imagegen
+    runtime: nvidia
+    volumes:
+      - ./seeds:/data/seeds:ro
+      - ./generated:/data/generated
+      - ./config:/data/config:ro
+    env_file: .env
+
+  step_b:
+    build: ./docker/step_b_screening
+    runtime: nvidia
+    volumes:
+      - ./generated:/data/generated:ro
+      - ./screened:/data/screened
+      - ./config:/data/config:ro
+      - ${TEACHER_MODEL_PATH}:/data/teacher_model:ro
+    env_file: .env
+
+  step_d:
+    build: ./docker/step_d_finetune
+    runtime: nvidia
+    volumes:
+      - ./dataset:/data/dataset:ro
+      - ./models:/data/models
+      - ./config:/data/config:ro
+    env_file: .env

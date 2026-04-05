@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Environment
+.env
+
+# Data (large/generated files)
+generated/loop_*/
+screened/loop_*/
+dataset/loop_*/
+models/loop_*/
+seeds/images/*.png
+seeds/images/*.jpg
+eval/test_real/*.png
+eval/test_real/*.jpg
+eval/val_generated/*.png
+eval/val_generated/*.jpg
+eval/edge_cases/*.png
+eval/edge_cases/*.jpg
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Cache
+.pytest_cache/
+uv.lock

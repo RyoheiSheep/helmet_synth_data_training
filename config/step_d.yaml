@@ -1,0 +1,10 @@
+base_model: "llava-hf/llava-1.5-7b-hf"
+lora:
+  r: 16
+  alpha: 32
+  target_modules: ["q_proj", "v_proj"]
+  quantization: none     # Full precision LoRA
+epochs: 3
+batch_size: 4
+learning_rate: 2e-4
+output_format: structured_json   # label + rationale

@@ -1,0 +1,7 @@
+image_id,seed_id,seed_label,prompt,loop_num
+img_001,seed_01,tight,"Edit this image: change the background to office.",1
+img_002,seed_02,loose,"Edit this image: change the background to park.",1
+img_003,seed_03,tight,"Edit this image: change the background to warehouse.",1
+img_004,seed_04,loose,"Edit this image: change the background to street.",1
+img_005,seed_05,tight,"Edit this image: change the background to factory.",1
+img_006,seed_01,tight,"Edit this image: change the background to rooftop.",1
