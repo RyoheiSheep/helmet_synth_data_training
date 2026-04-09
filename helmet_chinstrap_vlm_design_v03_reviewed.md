@@ -194,7 +194,7 @@ screened/loop_{N}/
 
 **設定（config/step_b.yaml）:**
 ```yaml
-teacher_model: "Qwen/Qwen2.5-VL-72B-Instruct"
+teacher_model: "Qwen/Qwen3.5-27B"
 teacher_backend: "vllm"
 guided_decoding:
   backend: "outlines"
@@ -246,14 +246,9 @@ dataset/loop_{N}/
 
 **目的:** 学習データでVLMをLoRA fine-tuneする
 
-**使用モデル候補（軽量VLM）:**
+**使用モデル（v0.3で確定）:** `Qwen/Qwen3.5-8B`
 
-| モデル | パラメータ | 備考 |
-|---|---|---|
-| LLaVA-1.5-7B | 7B | 実績あり、扱いやすい |
-| PaliGemma2-3B | 3B | 軽量、Google製 |
-| Qwen2-VL-7B | 7B | 精度高め |
-| moondream2 | 1.9B | 最軽量、エッジ向け |
+Teacher（Qwen3.5-27B）と同系列で語彙・chat template を共有できるため、蒸留性と構造化出力の整合性が高い。軽量エッジ向けモデル（moondream2 / PaliGemma2 等）への置き換えは v0.4+ で再検討（PLAN.md Phase 4）。
 
 **Fine-tuning方式:** LoRA（量子化なし、Full precision）
 
@@ -273,7 +268,7 @@ models/loop_{N}/
 
 **設定（config/step_d.yaml）:**
 ```yaml
-base_model: "llava-hf/llava-1.5-7b-hf"
+base_model: "Qwen/Qwen3.5-8B"
 lora:
   r: 16
   alpha: 32
@@ -413,7 +408,7 @@ services:
 ```
 REPLICATE_API_TOKEN=xxx   # 画像生成API
 HF_TOKEN=xxx              # HuggingFaceモデル取得
-TEACHER_MODEL_PATH=/models/Qwen2.5-VL-72B-Instruct  # ローカルモデルパス
+TEACHER_MODEL_PATH=/models/Qwen3.5-27B  # ローカルモデルパス
 LOOP_NUM=1
 ```
 
