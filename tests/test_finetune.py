@@ -14,7 +14,7 @@ from docker.step_d_finetune.finetune import (
 FIXTURES = Path(__file__).parent / "fixtures" / "step_d"
 
 DEFAULT_CONFIG = {
-    "base_model": "llava-hf/llava-1.5-7b-hf",
+    "base_model": "Qwen/Qwen3.5-8B",
     "lora": {
         "r": 16,
         "alpha": 32,
