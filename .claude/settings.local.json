@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "WebSearch",
+      "WebFetch(domain:replicate.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.bfl.ai)",
+      "WebFetch(domain:api.bfl.ai)",
+      "WebFetch(domain:www.datacamp.com)",
+      "WebFetch(domain:docs.vllm.ai)",
+      "Bash(git init:*)"
+    ]
+  }
+}
