@@ -72,6 +72,7 @@ def run_teacher_inference(
     top_p: float = 0.8,
     max_tokens: int = 256,
     rationale: bool = True,
+    dtype: str = "auto",
 ) -> dict[str, dict]:
     """Run Teacher VLM on a batch of images using vLLM offline inference.
 
@@ -86,6 +87,8 @@ def run_teacher_inference(
         top_p: Top-p sampling.
         max_tokens: Max output tokens.
         rationale: Whether to request rationale in output.
+        dtype: Model dtype — "auto", "float16", "bfloat16", or "float8" for
+            FP8 quantization (needed when VRAM < model size at full precision).
 
     Returns:
         Dict mapping image_id -> {"label": "tight"|"loose", "rationale": "..."}.
@@ -93,12 +96,17 @@ def run_teacher_inference(
     from vllm import LLM, SamplingParams
     from vllm.sampling_params import StructuredOutputsParams
 
+    # Build LLM kwargs; only pass quantization when explicitly requested
+    llm_kwargs = {
+        "model": model_id,
+        "tensor_parallel_size": tensor_parallel_size,
+        "max_model_len": max_model_len,
+    }
+    if dtype != "auto":
+        llm_kwargs["dtype"] = dtype
+
     # Load model once
-    llm = LLM(
-        model=model_id,
-        tensor_parallel_size=tensor_parallel_size,
-        max_model_len=max_model_len,
-    )
+    llm = LLM(**llm_kwargs)
 
     # Configure structured output
     schema = LABEL_SCHEMA if rationale else LABEL_ONLY_SCHEMA

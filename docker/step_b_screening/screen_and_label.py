@@ -144,6 +144,7 @@ def _run_vllm_teacher(meta_path: Path, image_dir: Path, config: dict) -> dict[st
         top_p=config.get("sampling", {}).get("top_p", 0.8),
         max_tokens=config.get("sampling", {}).get("max_tokens", 256),
         rationale=config.get("rationale", True),
+        dtype=config.get("dtype", "auto"),
     )
 
 

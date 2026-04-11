@@ -2,6 +2,7 @@ teacher_model: "Qwen/Qwen3.5-27B"
 provider: "vllm"                     # "vllm" for local GPU, "precomputed" for testing
 tensor_parallel_size: 1              # increase for multi-GPU
 max_model_len: 4096
+dtype: "float8"                      # FP8 quantization — fits 27B model on 48GB A40
 enable_thinking: false               # disable thinking mode for faster, cleaner output
 sampling:
   temperature: 0.7
