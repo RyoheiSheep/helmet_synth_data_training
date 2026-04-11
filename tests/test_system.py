@@ -1,4 +1,4 @@
-"""System test: run the full pipeline A → B → C → D → Evaluate for multiple loops.
+"""System test: run the full pipeline A → B → C → D → Predict → Evaluate for multiple loops.
 
 Uses dummy/dry-run modes throughout. Simulates teacher responses by echoing
 seed_label back (with a configurable error rate to test rejection).
@@ -16,6 +16,7 @@ from docker.step_b_screening.screen_and_label import screen_and_label
 from docker.step_d_finetune.finetune import run_finetuning
 from scripts.build_dataset import build_dataset
 from scripts.evaluate import compute_accuracy, evaluate, mcnemar_test
+from scripts.predict import run_prediction
 
 
 def _create_seed_data(seeds_dir: Path, num_seeds: int = 6):
@@ -426,3 +427,81 @@ class TestPipelineDataFlow:
         )
         assert log["status"] == "completed"
         assert log["num_samples"] == 8
+
+
+class TestPredictIntegration:
+    """Verify predict.py integrates into the pipeline: D → Predict → Evaluate."""
+
+    @staticmethod
+    def _create_eval_dir(seeds_dir: Path, eval_dir: Path):
+        """Reuse seed data as a fake eval set."""
+        import shutil
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(seeds_dir / "images", eval_dir / "images")
+        shutil.copy2(seeds_dir / "labels.csv", eval_dir / "labels.csv")
+
+    def test_predict_dummy_feeds_evaluate(self, tmp_path):
+        """A → B → C → D → Predict(dummy) → Evaluate round-trip."""
+        seeds_dir = tmp_path / "seeds"
+        _create_seed_data(seeds_dir, num_seeds=6)
+
+        # A
+        gen_dir = tmp_path / "generated" / "loop_1"
+        config_a = {
+            "loop": 1, "variations_per_seed": 2,
+            "diversity": {"person": "low", "background": "low",
+                          "angle_deg": 5, "chinstrap_delta": 0},
+            "api": {"provider": "dummy", "model": "test"},
+        }
+        run_step_a(seeds_dir, gen_dir, config_a)
+
+        # B
+        teacher_responses = _simulate_teacher_responses(
+            gen_dir / "meta.csv", error_rate=0.0, seed=42
+        )
+        screened_dir = tmp_path / "screened" / "loop_1"
+        screen_and_label(
+            meta_path=gen_dir / "meta.csv",
+            teacher_responses=teacher_responses,
+            output_dir=screened_dir,
+        )
+
+        # C
+        dataset_dir = tmp_path / "dataset" / "loop_1"
+        build_dataset(
+            labeled_jsonl=screened_dir / "labeled.jsonl",
+            image_dir=gen_dir / "images",
+            output_dir=dataset_dir,
+        )
+
+        # D
+        model_dir = tmp_path / "models" / "loop_1"
+        config_d = {
+            "base_model": "test-model",
+            "lora": {"r": 8, "alpha": 16, "target_modules": ["q_proj"]},
+            "epochs": 1, "batch_size": 4, "learning_rate": 1e-4,
+        }
+        run_finetuning(
+            train_jsonl=dataset_dir / "train.jsonl",
+            output_dir=model_dir, config=config_d, dry_run=True,
+        )
+
+        # Predict (dummy)
+        eval_dir = tmp_path / "eval" / "test_real"
+        self._create_eval_dir(seeds_dir, eval_dir)
+
+        preds_path = tmp_path / "eval" / "preds_loop_1.jsonl"
+        preds = run_prediction(
+            eval_dir=eval_dir,
+            output_path=preds_path,
+            provider="dummy",
+            dummy_accuracy=0.8,
+            dummy_seed=100,
+        )
+        assert len(preds) == 6
+        assert preds_path.exists()
+
+        # Evaluate
+        results = evaluate(preds_path)
+        assert results["metrics"]["total"] == 6
+        assert 0 < results["metrics"]["accuracy"] <= 1.0

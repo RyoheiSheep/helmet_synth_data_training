@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from docker.step_d_finetune.finetune import (
+    format_answer,
     load_dataset,
     run_finetuning,
     validate_dataset,
@@ -125,11 +126,48 @@ class TestRunFinetuning:
         losses = [e["loss"] for e in log["loss_history"]]
         assert losses == sorted(losses, reverse=True)
 
-    def test_live_raises_not_implemented(self, output_dir):
-        with pytest.raises(NotImplementedError, match="GPU"):
-            run_finetuning(
-                train_jsonl=FIXTURES / "train.jsonl",
-                output_dir=output_dir,
-                config=DEFAULT_CONFIG,
-                dry_run=False,
-            )
+
+class TestFormatAnswer:
+    def test_label_and_rationale(self):
+        out = format_answer({"label": "tight", "rationale": "snug fit"})
+        parsed = json.loads(out)
+        assert parsed == {"label": "tight", "rationale": "snug fit"}
+
+    def test_label_only(self):
+        out = format_answer({"label": "loose"})
+        parsed = json.loads(out)
+        assert parsed == {"label": "loose"}
+
+    def test_key_order_label_first(self):
+        out = format_answer({"rationale": "test", "label": "tight"})
+        keys = list(json.loads(out).keys())
+        assert keys[0] == "label"
+
+
+@pytest.mark.gpu
+class TestRunFinetuningGPU:
+    """Integration tests that require GPU + transformers/peft.
+
+    Run with: uv run pytest -m gpu tests/test_finetune.py
+    """
+
+    def test_live_training_produces_adapter(self, output_dir):
+        config = {
+            "base_model": "Qwen/Qwen3.5-8B",
+            "lora": {"r": 8, "alpha": 16, "target_modules": ["q_proj", "v_proj"]},
+            "epochs": 1,
+            "batch_size": 2,
+            "learning_rate": 1e-4,
+            "max_length": 512,
+        }
+        log = run_finetuning(
+            train_jsonl=FIXTURES / "train.jsonl",
+            output_dir=output_dir,
+            config=config,
+            dry_run=False,
+        )
+        assert log["status"] == "completed"
+        assert len(log["loss_history"]) == 1
+        lora_dir = output_dir / "lora_weights"
+        assert (lora_dir / "adapter_config.json").exists()
+        assert (lora_dir / "adapter_model.safetensors").exists()

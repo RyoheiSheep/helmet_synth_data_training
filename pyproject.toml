@@ -15,3 +15,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "gpu: tests that require a GPU and heavy ML dependencies (torch, peft, transformers)",
+]
+addopts = "-m 'not gpu'"
