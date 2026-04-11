@@ -9,7 +9,12 @@
       "WebFetch(domain:api.bfl.ai)",
       "WebFetch(domain:www.datacamp.com)",
       "WebFetch(domain:docs.vllm.ai)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(git -C /c/Users/user/Desktop/workplace/helmet_synth_data_training status)",
+      "Bash(git -C /c/Users/user/Desktop/workplace/helmet_synth_data_training diff)",
+      "Bash(git -C /c/Users/user/Desktop/workplace/helmet_synth_data_training log --oneline -10)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
     ]
   }
 }
