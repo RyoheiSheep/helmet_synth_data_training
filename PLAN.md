@@ -6,7 +6,7 @@ Coding rules: [CLAUDE.md](CLAUDE.md)
 
 **Status legend:** ✅ done · 🟡 partial · ⬜ not started · ⏸️ deferred (v0.4+)
 
-**Overall state (2026-04-09):** Skeleton complete — all four steps run end-to-end in dummy/dry-run mode, 55 tests pass. Real GPU backends (Flux Kontext, vLLM Teacher, LoRA fine-tune) are stubbed but unverified. No real seed or eval data yet. **Next milestone: Loop 1 on real data, end-to-end.**
+**Overall state (2026-04-12):** Phase 0 complete. Phase 1.B (real LoRA fine-tuning) and 1.C (predict.py) code implemented — 72 tests pass. Seed data (33 images) and eval data (test_real: 8, edge_cases: 4) acquired. GPU tests skipped by default (`addopts = "-m 'not gpu'"`). **Next milestone: GPU smoke tests on RunPod (1.D/1.E), then Loop 1 execution (1.F).**
 
 ---
 
@@ -33,7 +33,30 @@ Every step is importable, has a dummy/dry-run mode, and is covered by unit tests
 | 0.15 | System test — full A→B→C→D→Eval | ✅ | [tests/test_system.py](tests/test_system.py) | Multi-loop dummy run + McNemar on same test set |
 | 0.16 | Test fixtures per step | ✅ | `tests/fixtures/step_{a,b,c,d}/` | |
 
-**Baseline verification:** `uv run pytest` → 55 tests collected, all passing (as of 2026-04-09).
+**Baseline verification:** `uv run pytest` → 72 tests collected, all passing (as of 2026-04-11).
+
+---
+
+## GPU Environment
+
+**Platform:** RunPod Community Cloud — **1× A40 48 GB** on-demand ($0.35/hr).
+
+Chosen as the cheapest money × time option for our small dataset (~330 generated images, ~200 training samples):
+
+| Step | Model | VRAM estimate | Fits A40? |
+|---|---|---|---|
+| A — Image Gen | FLUX.2 Klein 9B (FP16) | ~20 GB | Yes |
+| B — Teacher | Qwen3.5-27B (**FP8 quantized**) | ~28 GB | Yes |
+| D — Fine-tune | Qwen3.5-8B + LoRA (FP16) | ~22 GB | Yes |
+| Predict | Qwen3.5-8B + LoRA (FP16) | ~18 GB | Yes |
+
+Step B requires FP8 quantization — the 27B model at FP16 (~54 GB) exceeds 48 GB. vLLM supports FP8 natively via `--quantization fp8` or `--dtype float8`. Update `config/step_b.yaml` with `dtype: float8` when running on GPU.
+
+**Estimated Loop 1 cost:** ~$1–2 (2–4 hours active compute including setup).
+
+**Alternatives considered:**
+- A100 80 GB ($1.39/hr): fits everything at full precision, but 4× the price. Not worth it for our dataset size.
+- RTX 4090 24 GB ($0.59/hr): too tight for FLUX 9B + fine-tuning overheads; risk of OOM.
 
 ---
 
@@ -41,38 +64,36 @@ Every step is importable, has a dummy/dry-run mode, and is covered by unit tests
 
 Goal: complete ONE real loop end-to-end with actual seeds, real Teacher VLM, real fine-tuning, and `test_real` evaluation. This is the v0.3 success criterion.
 
-### 1.A Data acquisition ⬜ (blocks everything else)
+### 1.A Data acquisition 🟡
 
 | # | Task | Status | Files / Path | Definition of done |
 |---|---|---|---|---|
-| 1.A.1 | Collect ≤100 seed images (tight & loose) | ⬜ | `seeds/images/*.png` | Balanced tight/loose count; diverse enough that Flux edits preserve labels |
-| 1.A.2 | Hand-label seeds | ⬜ | `seeds/labels.csv` | Each image_id mapped to `tight`/`loose` |
-| 1.A.3 | Collect ≥50 real test images | ⬜ | `eval/test_real/images/`, `eval/test_real/labels.csv` | Real-environment photos, NOT from seeds; hand-labeled |
-| 1.A.4 | Collect ≥20 edge-case images | ⬜ | `eval/edge_cases/images/`, `eval/edge_cases/labels.csv` | Half-fastened, chin tucked, backlit, etc. |
+| 1.A.1 | Collect ≤100 seed images (tight & loose) | ✅ | `seeds/images/*.png` (33 images: 15 tight, 18 loose) | Balanced tight/loose count; diverse enough that Flux edits preserve labels |
+| 1.A.2 | Hand-label seeds | ✅ | `seeds/labels.csv` | Each image_id mapped to `tight`/`loose` |
+| 1.A.3 | Collect ≥50 real test images | 🟡 | `eval/test_real/images/` (8 images), `eval/test_real/labels.csv` | Real-environment photos, NOT from seeds; hand-labeled. Currently 8, target ≥50. Enough for smoke test. |
+| 1.A.4 | Collect ≥20 edge-case images | 🟡 | `eval/edge_cases/images/` (4 images), `eval/edge_cases/labels.csv` | Half-fastened, chin tucked, backlit, etc. Currently 4, target ≥20. Enough for smoke test. |
 | 1.A.5 | Decide on val_generated strategy | ⬜ | `eval/val_generated/` | Design says 10–20/loop with hand labels. Decide: annotate a sample of Step A output per loop? |
 
-### 1.B Step D — real LoRA fine-tuning ⬜
+### 1.B Step D — real LoRA fine-tuning ✅ (code) / ⬜ (GPU verification)
 
-Currently `run_finetuning()` raises `NotImplementedError` when `dry_run=False`. Need real implementation.
+Real training loop implemented. GPU smoke test still needed.
 
 | # | Task | Status | Files | Definition of done |
 |---|---|---|---|---|
-| 1.B.1 | Step D `Dockerfile` + `requirements.txt` | ⬜ | `docker/step_d_finetune/{Dockerfile,requirements.txt}` | CUDA base; installs `torch transformers peft accelerate datasets Pillow pyyaml`. Currently missing — compose will fail to build. |
-| 1.B.2 | Implement Qwen3.5-8B LoRA training loop | ⬜ | `docker/step_d_finetune/finetune.py` (extend `run_finetuning`) | Loads `Qwen/Qwen3.5-8B`, attaches LoRA via peft, trains on `train.jsonl`, writes real adapter weights + per-step loss to `training_log.json`. Deferred-import torch/peft/transformers per [CLAUDE.md §4.1](CLAUDE.md). |
-| 1.B.3 | Dataset collator for image+JSON answer | ⬜ | Part of 1.B.2 | Converts `{image_path, question, answer}` into model inputs; answer is stringified JSON |
+| 1.B.1 | Step D `Dockerfile` + `requirements.txt` | ✅ | [docker/step_d_finetune/Dockerfile](docker/step_d_finetune/Dockerfile), [docker/step_d_finetune/requirements.txt](docker/step_d_finetune/requirements.txt) | CUDA 12.4 base; pinned torch/transformers/peft/accelerate/datasets |
+| 1.B.2 | Implement Qwen3.5-8B LoRA training loop | ✅ | [docker/step_d_finetune/finetune.py](docker/step_d_finetune/finetune.py) | `_run_live_training()` loads model, attaches LoRA via peft, trains, saves adapter. All heavy imports deferred per CLAUDE.md §4.1. `format_answer()` added for stable JSON serialization. |
+| 1.B.3 | Dataset collator for image+JSON answer | ✅ | Part of 1.B.2 | `_build_collator()` converts samples to model inputs with prompt-masked labels (answer-only loss) |
 | 1.B.4 | Smoke test on 1 GPU with tiny subset | ⬜ | — | Run on ~20 samples, 1 epoch. Verify loss decreases and adapter_config.json is real peft format. |
-| 1.B.5 | Add integration test with `--dry-run=False` marked `@pytest.mark.gpu` | ⬜ | `tests/test_finetune.py` | Skipped by default; runs manually when GPU is available |
+| 1.B.5 | Add integration test with `--dry-run=False` marked `@pytest.mark.gpu` | ✅ | [tests/test_finetune.py](tests/test_finetune.py) | `TestRunFinetuningGPU` class; `gpu` marker registered in pyproject.toml; skipped by default |
 
-### 1.C Inference script for evaluation ⬜
-
-`scripts/evaluate.py` only computes metrics from a predictions JSONL — nothing currently produces that JSONL. Need an inference entry point.
+### 1.C Inference script for evaluation ✅
 
 | # | Task | Status | Files | Definition of done |
 |---|---|---|---|---|
-| 1.C.1 | New `scripts/predict.py` (host side, no container) | ⬜ | `scripts/predict.py` | Loads base model + LoRA adapter, runs on an eval dir, writes `eval_out/loop_{N}/{test_real,val_generated,edge_cases}.jsonl` with `{image_id, label, ground_truth[, rationale]}`. Deferred-imports transformers/peft. |
-| 1.C.2 | Fake backend for predict.py | ⬜ | Same file | `--provider dummy` reads ground truth from labels.csv and echoes it with a configurable error rate — mirrors Step A/B/D pattern, enables unit testing without GPU |
-| 1.C.3 | Unit tests for `predict.py` | ⬜ | `tests/test_predict.py` | Uses dummy provider; verifies JSONL schema and arg parsing |
-| 1.C.4 | Wire `predict.py` into system test | ⬜ | `tests/test_system.py` | Add a step that runs predict on fake eval data, then passes it to `evaluate()` |
+| 1.C.1 | New `scripts/predict.py` (host side, no container) | ✅ | [scripts/predict.py](scripts/predict.py) | `run_prediction()` with `dummy` and `vllm` providers. vLLM path loads base model + LoRA adapter via `LoRARequest`, uses structured output. Deferred imports for vllm. |
+| 1.C.2 | Fake backend for predict.py | ✅ | Same file | `predict_dummy()` with configurable accuracy + seed; mirrors Step A/B/D pattern |
+| 1.C.3 | Unit tests for `predict.py` | ✅ | [tests/test_predict.py](tests/test_predict.py) | 10 tests: schema, label constraints, dummy accuracy, error paths. Fixtures in `tests/fixtures/eval/` |
+| 1.C.4 | Wire `predict.py` into system test | ✅ | [tests/test_system.py](tests/test_system.py) | `TestPredictIntegration` class runs A→B→C→D→Predict(dummy)→Evaluate |
 
 ### 1.D Step A — Flux Kontext verification ⬜
 
@@ -127,7 +148,7 @@ Run only after Phase 1 is complete and the 1-loop hypothesis is validated.
 |---|---|---|---|---|
 | 3.1 | Run-level logging (stdout is fine) with loop_num + step | ⬜ | All entry points | Each step prints structured `[stepX loop=N]` lines |
 | 3.2 | Per-loop `summary.json` aggregator | ⬜ | `scripts/summarize_loop.py` | Combines keep_rate, training_log, metrics into one file per loop |
-| 3.3 | Dockerfile for step_d | ⬜ | `docker/step_d_finetune/Dockerfile` | Duplicate of 1.B.1 if not done then |
+| 3.3 | Dockerfile for step_d | ✅ | [docker/step_d_finetune/Dockerfile](docker/step_d_finetune/Dockerfile) | Done in 1.B.1 |
 | 3.4 | Smoke-test all three containers build | ⬜ | — | `docker compose build` succeeds on the target GPU host |
 | 3.5 | Pin vllm/torch/transformers versions | ⬜ | All three `requirements.txt` | Reproducibility |
 | 3.6 | Pre-commit hook: `uv run pytest` | ⬜ | `.pre-commit-config.yaml` (or simpler shell hook) | Catches regressions before commit |
@@ -168,3 +189,5 @@ Phase 4 items are explicitly out of scope for v0.3.
 ## Changelog
 
 - **2026-04-09** — PLAN.md created. Phase 0 marked complete (55 tests passing, all dummy/dry-run backends working). Phase 1 broken into A–F sub-phases. Identified missing Step D Dockerfile/requirements and missing predict.py as the two biggest code gaps.
+- **2026-04-11** — Phase 1.B (code) and 1.C completed. Step D: real LoRA training loop (`_run_live_training`, `_build_collator`, `format_answer`), Dockerfile + pinned requirements. predict.py: dummy + vLLM providers, 10 unit tests, wired into system test. 72 tests passing. Remaining blockers: data acquisition (1.A) and GPU smoke tests (1.B.4, 1.D, 1.E).
+- **2026-04-12** — Seed data acquired (33 images: 15 tight, 18 loose). Eval data acquired (test_real: 8, edge_cases: 4) — below design targets but sufficient for smoke tests. Added `addopts = "-m 'not gpu'"` to pyproject.toml so GPU tests are skipped by default. Added eval directory scaffolding (images/, labels.csv). GPU environment decided: **RunPod 1× A40 48 GB** ($0.35/hr) — cheapest option that fits all steps (Step B uses FP8 quantization for 27B Teacher).
