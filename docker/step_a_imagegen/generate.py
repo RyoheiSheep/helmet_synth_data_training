@@ -135,11 +135,11 @@ def load_seeds(seeds_dir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _load_diffusers_pipeline(model_id: str):
-    """Load a Flux2KleinPipeline. Imports are deferred so tests don't need torch."""
+    """Load a FluxKontextPipeline. Imports are deferred so tests don't need torch."""
     import torch
-    from diffusers import Flux2KleinPipeline
+    from diffusers import FluxKontextPipeline
 
-    pipe = Flux2KleinPipeline.from_pretrained(
+    pipe = FluxKontextPipeline.from_pretrained(
         model_id,
         torch_dtype=torch.bfloat16,
     )
@@ -160,7 +160,7 @@ def _generate_one_diffusers(
     """Generate a single image with a loaded diffusers pipeline.
 
     Args:
-        pipe: A loaded Flux2KleinPipeline.
+        pipe: A loaded FluxKontextPipeline.
         prompt: Edit prompt.
         seed_image_path: Path to the seed image.
         output_path: Where to save the generated image.
