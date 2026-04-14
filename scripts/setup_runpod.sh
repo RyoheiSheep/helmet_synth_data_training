@@ -19,7 +19,8 @@ uv sync --dev
 echo "=== [3/4] Installing GPU dependencies ==="
 # Single pip install for all steps (A, B, D, predict).
 # Running directly on the pod — no Docker-in-Docker.
-uv pip install \
+# --no-cache-dir: avoid filling the container disk with wheel cache
+pip install --no-cache-dir \
     torch \
     "git+https://github.com/huggingface/diffusers.git" \
     transformers \
