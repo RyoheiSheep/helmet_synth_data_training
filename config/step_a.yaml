@@ -7,7 +7,7 @@ diversity:
   chinstrap_delta: 0   # 0=keep, 1=slight, 2=moderate
 api:
   provider: "diffusers"                          # "diffusers" for local, "dummy" for testing
-  model: "black-forest-labs/FLUX.2-klein-9B"
+  model: "black-forest-labs/FLUX.2-klein-4B"
   num_inference_steps: 50
   guidance_scale: 4.0
   output_format: "png"                           # png / jpeg
