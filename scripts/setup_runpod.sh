@@ -20,7 +20,7 @@ python3 -m pip install --no-cache-dir \
 
 # diffusersは安定版に下げる
 python3 -m pip install --no-cache-dir \
-    "diffusers==0.35.1" \
+    git+https://github.com/huggingface/diffusers.git \
     transformers \
     accelerate \
     sentencepiece \
