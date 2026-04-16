@@ -1,8 +1,8 @@
-teacher_model: "Qwen/Qwen2.5-VL-7B-Instruct"
+teacher_model: "Qwen/Qwen3.5-9B"
 provider: "vllm"                     # "vllm" for local GPU, "precomputed" for testing
 tensor_parallel_size: 1              # increase for multi-GPU
 max_model_len: 4096
-dtype: "float8"                      # FP8 quantization — fits 27B model on 48GB A40
+dtype: "bfloat16"                    # 7B model fits in bfloat16 on 48GB A40 (~14GB VRAM)
 enable_thinking: false               # disable thinking mode for faster, cleaner output
 sampling:
   temperature: 0.7

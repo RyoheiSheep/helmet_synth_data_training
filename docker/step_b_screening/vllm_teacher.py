@@ -64,7 +64,7 @@ def _build_messages(image_path: Path, rationale: bool = True) -> list[dict]:
 def run_teacher_inference(
     image_paths: list[Path],
     image_ids: list[str],
-    model_id: str = "Qwen/Qwen3.5-27B",
+    model_id: str = "Qwen/Qwen3.5-9B",
     tensor_parallel_size: int = 1,
     max_model_len: int = 4096,
     enable_thinking: bool = False,

@@ -10,6 +10,7 @@ set -euo pipefail
 
 LOOP=${1:?Usage: run_loop.sh <loop_number>}
 PREV_LOOP=$((LOOP - 1))
+BASE_MODEL=$(python3 -c "import yaml; c=yaml.safe_load(open('config/step_d.yaml')); print(c['base_model'])")
 
 echo "============================================"
 echo "  Loop ${LOOP} — full pipeline"
@@ -59,7 +60,8 @@ python3 scripts/predict.py \
     --eval-dir eval/test_real \
     --output "eval_out/loop_${LOOP}/test_real.jsonl" \
     --provider vllm \
-    --model-dir "models/loop_${LOOP}"
+    --model-dir "models/loop_${LOOP}" \
+    --base-model "${BASE_MODEL}"
 
 # ── Predict on edge_cases ─────────────────────────────────────────────
 echo ""
@@ -68,7 +70,8 @@ python3 scripts/predict.py \
     --eval-dir eval/edge_cases \
     --output "eval_out/loop_${LOOP}/edge_cases.jsonl" \
     --provider vllm \
-    --model-dir "models/loop_${LOOP}"
+    --model-dir "models/loop_${LOOP}" \
+    --base-model "${BASE_MODEL}"
 
 # ── Evaluate ──────────────────────────────────────────────────────────
 echo ""

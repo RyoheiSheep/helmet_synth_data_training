@@ -84,7 +84,7 @@ def predict_dummy(
 def predict_vllm(
     eval_entries: list[dict],
     model_dir: Path,
-    base_model: str = "Qwen/Qwen3.5-8B",
+    base_model: str = "Qwen/Qwen3.5-9B",
     tensor_parallel_size: int = 1,
     max_model_len: int = 4096,
     temperature: float = 0.1,
@@ -163,7 +163,7 @@ def run_prediction(
     output_path: Path,
     provider: str = "dummy",
     model_dir: Path | None = None,
-    base_model: str = "Qwen/Qwen3.5-8B",
+    base_model: str = "Qwen/Qwen3.5-9B",
     dummy_accuracy: float = 0.8,
     dummy_seed: int = 42,
 ) -> list[dict]:
@@ -225,7 +225,7 @@ def main():
         help="Path to models/loop_{N}/ (vllm provider)",
     )
     parser.add_argument(
-        "--base-model", type=str, default="Qwen/Qwen3.5-8B",
+        "--base-model", type=str, default="Qwen/Qwen3.5-9B",
         help="Base model ID (vllm provider)",
     )
     parser.add_argument(

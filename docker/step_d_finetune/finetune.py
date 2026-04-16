@@ -120,7 +120,7 @@ def _run_live_training(
     import torch
     from torch.utils.data import DataLoader, Dataset
     from transformers import (
-        AutoModelForCausalLM,
+        AutoModelForImageTextToText,
         AutoProcessor,
         get_linear_schedule_with_warmup,
     )
@@ -141,7 +141,7 @@ def _run_live_training(
         print("[step_d] WARNING: no CUDA device detected, running on CPU.")
 
     processor = AutoProcessor.from_pretrained(base_model, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
+    model = AutoModelForImageTextToText.from_pretrained(
         base_model,
         torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
         trust_remote_code=True,
