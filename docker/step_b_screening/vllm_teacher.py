@@ -44,7 +44,7 @@ def _build_messages(image_path: Path, rationale: bool = True) -> list[dict]:
     user_content = [
         {
             "type": "image_url",
-            "image_url": {"url": f"file://{image_path}"},
+            "image_url": {"url": f"file://{image_path.resolve()}"},
         },
         {
             "type": "text",
@@ -108,7 +108,7 @@ def run_teacher_inference(
     if dtype != "auto":
         llm_kwargs["dtype"] = dtype
     if allowed_local_media_path is not None:
-        llm_kwargs["allowed_local_media_path"] = str(allowed_local_media_path)
+        llm_kwargs["allowed_local_media_path"] = str(allowed_local_media_path.resolve())
 
     # Load model once
     llm = LLM(**llm_kwargs)
