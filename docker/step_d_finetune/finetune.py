@@ -65,14 +65,48 @@ def _build_collator(processor, max_length: int):
     IGNORE_INDEX = -100
 
     def collate_fn(batch: list[dict]) -> dict:
-        images = [Image.open(s["image_path"]).convert("RGB") for s in batch]
-        prompts = [s["question"] for s in batch]
-        answers = [format_answer(s["answer"]) for s in batch]
-        full_texts = [p + "\n" + a for p, a in zip(prompts, answers)]
+        all_texts = []
+        all_images = []
+        answer_lengths = []
+
+        for s in batch:
+            image = Image.open(s["image_path"]).convert("RGB")
+            all_images.append(image)
+
+            answer_str = format_answer(s["answer"])
+
+            # apply_chat_template inserts image placeholder tokens so the
+            # model can align image features with the token sequence.
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image"},
+                        {"type": "text", "text": s["question"]},
+                    ],
+                },
+                {
+                    "role": "assistant",
+                    "content": answer_str,
+                },
+            ]
+            text = processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=False,
+            )
+            all_texts.append(text)
+
+            # Length of answer tokens for loss masking (approximate: answer
+            # is always at the tail of the sequence before any padding).
+            answer_ids = processor.tokenizer(
+                answer_str, add_special_tokens=False
+            )["input_ids"]
+            answer_lengths.append(len(answer_ids))
 
         encoded = processor(
-            text=full_texts,
-            images=images,
+            text=all_texts,
+            images=all_images,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -82,18 +116,16 @@ def _build_collator(processor, max_length: int):
         input_ids = encoded["input_ids"]
         labels = input_ids.clone()
 
-        # Mask everything before the answer so loss is computed on the answer only.
-        prompt_lens = [
-            len(
-                processor.tokenizer(
-                    p + "\n", add_special_tokens=False
-                )["input_ids"]
-            )
-            for p in prompts
-        ]
-        for i, plen in enumerate(prompt_lens):
-            labels[i, :plen] = IGNORE_INDEX
-        # Also mask padding.
+        # Mask prompt tokens — only the answer contributes to loss.
+        for i, alen in enumerate(answer_lengths):
+            if "attention_mask" in encoded:
+                non_pad_len = int(encoded["attention_mask"][i].sum().item())
+            else:
+                non_pad_len = input_ids.shape[1]
+            prompt_end = max(0, non_pad_len - alen)
+            labels[i, :prompt_end] = IGNORE_INDEX
+
+        # Mask padding.
         if "attention_mask" in encoded:
             labels[encoded["attention_mask"] == 0] = IGNORE_INDEX
 
