@@ -6,5 +6,5 @@ lora:
   quantization: none     # Full precision LoRA
 epochs: 3
 batch_size: 4
-learning_rate: 2e-4
+learning_rate: 2.0e-4
 output_format: structured_json   # label + rationale

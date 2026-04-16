@@ -228,7 +228,7 @@ def run_finetuning(
 
     epochs = config.get("epochs", 3)
     batch_size = config.get("batch_size", 4)
-    learning_rate = config.get("learning_rate", 2e-4)
+    learning_rate = float(config.get("learning_rate", 2e-4))
     base_model = config.get("base_model", "Qwen/Qwen3.5-8B")
     max_length = config.get("max_length", 1024)
 
