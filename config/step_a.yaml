@@ -1,5 +1,5 @@
 loop: 1
-variations_per_seed: 10
+variations_per_seed: 1
 diversity:
   person: low          # low / medium / high
   background: low
