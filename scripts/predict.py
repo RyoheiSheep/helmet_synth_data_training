@@ -107,11 +107,20 @@ def predict_vllm(
     }
 
     lora_dir = model_dir / "lora_weights"
+
+    # Collect the eval image directory so we can allowlist it for vLLM's
+    # local-file security check (required since vLLM 0.19).
+    image_paths = [Path(e["image_path"]).resolve() for e in eval_entries]
+    image_dirs = {p.parent for p in image_paths}
+    # All eval images live under one directory; use the common parent.
+    allowed_media_path = str(image_paths[0].parent) if len(image_dirs) == 1 else str(image_paths[0].parents[1])
+
     llm = LLM(
         model=base_model,
         enable_lora=True,
         tensor_parallel_size=tensor_parallel_size,
         max_model_len=max_model_len,
+        allowed_local_media_path=allowed_media_path,
     )
 
     from vllm.lora.request import LoRARequest
@@ -129,7 +138,7 @@ def predict_vllm(
         messages = [
             {"role": "system", "content": "You are a safety inspection assistant."},
             {"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": f"file://{entry['image_path']}"}},
+                {"type": "image_url", "image_url": {"url": f"file://{Path(entry['image_path']).resolve()}"}},
                 {"type": "text", "text": QUESTION_WITH_RATIONALE},
             ]},
         ]
