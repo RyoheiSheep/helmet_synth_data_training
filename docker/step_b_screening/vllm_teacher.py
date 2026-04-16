@@ -73,6 +73,7 @@ def run_teacher_inference(
     max_tokens: int = 256,
     rationale: bool = True,
     dtype: str = "auto",
+    allowed_local_media_path: Path | None = None,
 ) -> dict[str, dict]:
     """Run Teacher VLM on a batch of images using vLLM offline inference.
 
@@ -89,6 +90,8 @@ def run_teacher_inference(
         rationale: Whether to request rationale in output.
         dtype: Model dtype — "auto", "float16", "bfloat16", or "float8" for
             FP8 quantization (needed when VRAM < model size at full precision).
+        allowed_local_media_path: Directory that vLLM is permitted to serve
+            local images from (required when using file:// URLs).
 
     Returns:
         Dict mapping image_id -> {"label": "tight"|"loose", "rationale": "..."}.
@@ -104,6 +107,8 @@ def run_teacher_inference(
     }
     if dtype != "auto":
         llm_kwargs["dtype"] = dtype
+    if allowed_local_media_path is not None:
+        llm_kwargs["allowed_local_media_path"] = str(allowed_local_media_path)
 
     # Load model once
     llm = LLM(**llm_kwargs)
