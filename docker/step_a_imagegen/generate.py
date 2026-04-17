@@ -191,6 +191,44 @@ def _generate_one_diffusers(
     out_image.save(output_path, format=output_format.upper())
 
 
+def _generate_batch_diffusers(
+    pipe,
+    prompts: list[str],
+    seed_image_paths: list[Path],
+    output_paths: list[Path],
+    num_inference_steps: int = 50,
+    guidance_scale: float = 4.0,
+    output_format: str = "png",
+):
+    """Generate a batch of images in one pipeline call.
+
+    Each item can have a completely different seed image and prompt.
+    Images are resized to a common size before batching (required because
+    the pipeline stacks them into a single tensor).
+    """
+    from PIL import Image
+
+    raw_images = [Image.open(p).convert("RGB") for p in seed_image_paths]
+
+    # All images in a batch must share the same spatial dimensions.
+    target_size = raw_images[0].size  # (width, height)
+    images = [
+        img.resize(target_size, Image.LANCZOS) if img.size != target_size else img
+        for img in raw_images
+    ]
+
+    result = pipe(
+        prompt=prompts,
+        image=images,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+    )
+
+    for out_image, output_path in zip(result.images, output_paths):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        out_image.save(output_path, format=output_format.upper())
+
+
 def generate_images(
     meta_rows: list[dict],
     seed_image_dir: Path,
@@ -200,6 +238,7 @@ def generate_images(
     num_inference_steps: int = 50,
     guidance_scale: float = 4.0,
     output_format: str = "png",
+    batch_size: int = 1,
 ) -> list[dict]:
     """Generate images for all prompt rows.
 
@@ -212,6 +251,7 @@ def generate_images(
         num_inference_steps: Denoising steps (diffusers only).
         guidance_scale: CFG scale (diffusers only).
         output_format: "png" or "jpeg".
+        batch_size: Number of images to generate per pipeline call (diffusers only).
 
     Returns:
         The meta_rows (unmodified, for chaining).
@@ -232,18 +272,18 @@ def generate_images(
     elif api_provider == "diffusers":
         pipe = _load_diffusers_pipeline(api_model)
 
-        for i, row in enumerate(meta_rows):
-            seed_image = seed_image_dir / f"{row['seed_id']}.png"
-            output_image = output_image_dir / f"{row['image_id']}.{ext}"
+        for batch_start in range(0, len(meta_rows), batch_size):
+            batch = meta_rows[batch_start : batch_start + batch_size]
+            batch_end = batch_start + len(batch)
 
-            print(f"  [{i + 1}/{len(meta_rows)}] {row['image_id']} "
-                  f"(seed={row['seed_id']}, label={row['seed_label']})")
+            print(f"  [{batch_start + 1}-{batch_end}/{len(meta_rows)}] "
+                  f"{[r['image_id'] for r in batch]}")
 
-            _generate_one_diffusers(
+            _generate_batch_diffusers(
                 pipe=pipe,
-                prompt=row["prompt"],
-                seed_image_path=seed_image,
-                output_path=output_image,
+                prompts=[r["prompt"] for r in batch],
+                seed_image_paths=[seed_image_dir / f"{r['seed_id']}.png" for r in batch],
+                output_paths=[output_image_dir / f"{r['image_id']}.{ext}" for r in batch],
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,
                 output_format=output_format,
@@ -312,6 +352,7 @@ def run_step_a(
         num_inference_steps=api_cfg.get("num_inference_steps", 50),
         guidance_scale=api_cfg.get("guidance_scale", 4.0),
         output_format=api_cfg.get("output_format", "png"),
+        batch_size=api_cfg.get("batch_size", 1),
     )
 
     write_meta_csv(meta_rows, output_dir)
