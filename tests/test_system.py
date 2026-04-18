@@ -58,14 +58,13 @@ def _simulate_teacher_responses(
             seed_label = row["seed_label"]
 
             if rng.random() < error_rate:
-                # Teacher disagrees
                 pred = "loose" if seed_label == "tight" else "tight"
-                rationale = "Simulated teacher error — label flipped."
+                observation = "Simulated error: strap appears ambiguous."
             else:
                 pred = seed_label
-                rationale = f"Simulated teacher agrees: chinstrap is {pred}."
+                observation = f"Simulated observation: chinstrap appears {pred}."
 
-            responses[image_id] = {"label": pred, "rationale": rationale}
+            responses[image_id] = {"label": pred, "observation": observation}
 
     return responses
 
@@ -216,11 +215,22 @@ class TestMultiLoopPipeline:
             output_dir=screened_dir,
         )
 
+        # Accumulate data from all prior loops (matches run_loop.sh --accumulate).
+        prior_sources = None
+        if loop_num > 1:
+            prior_sources = []
+            for prior in range(1, loop_num):
+                prior_jsonl = tmp_path / "screened" / f"loop_{prior}" / "labeled.jsonl"
+                prior_images = tmp_path / "generated" / f"loop_{prior}" / "images"
+                if prior_jsonl.exists():
+                    prior_sources.append((prior_jsonl, prior_images))
+
         dataset_dir = tmp_path / "dataset" / f"loop_{loop_num}"
         build_dataset(
             labeled_jsonl=screened_dir / "labeled.jsonl",
             image_dir=gen_dir / "images",
             output_dir=dataset_dir,
+            prior_sources=prior_sources,
         )
 
         model_dir = tmp_path / "models" / f"loop_{loop_num}"
@@ -280,6 +290,12 @@ class TestMultiLoopPipeline:
 
         # Verify loop 2 accuracy >= loop 1 (by design of our simulation)
         assert results_2["metrics"]["accuracy"] >= results_1["metrics"]["accuracy"]
+
+        # Loop 2 dataset must be larger than loop 1 (accumulation).
+        import json as _json
+        stats_1 = _json.loads((tmp_path / "dataset" / "loop_1" / "stats.json").read_text())
+        stats_2 = _json.loads((tmp_path / "dataset" / "loop_2" / "stats.json").read_text())
+        assert stats_2["total"] > stats_1["total"]
 
     def test_mcnemar_on_same_test_set(self, tmp_path):
         """McNemar requires same test set. Simulate two models on identical images."""

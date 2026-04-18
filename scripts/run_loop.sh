@@ -24,21 +24,41 @@ python3 docker/step_a_imagegen/generate.py \
     --seeds-dir seeds \
     --output-dir "generated/loop_${LOOP}"
 
-# ── Step B: Teacher Screening ─────────────────────────────────────────
+# ── Step B: Screening ────────────────────────────────────────────────
 echo ""
-echo "=== Step B: Teacher Screening (loop ${LOOP}) ==="
-python3 docker/step_b_screening/screen_and_label.py \
-    --loop "${LOOP}" \
-    --provider vllm \
-    --config config/step_b.yaml \
-    --generated-dir generated \
-    --output-dir screened
+echo "=== Step B: Screening (loop ${LOOP}) ==="
+if [ "${LOOP}" -eq 1 ]; then
+    echo "(loop 1: passthrough — inheriting seed labels, no VLM filter)"
+    python3 docker/step_b_screening/screen_and_label.py \
+        --loop "${LOOP}" \
+        --provider passthrough \
+        --generated-dir generated \
+        --output-dir screened
+elif [ -d "models/loop_${PREV_LOOP}/lora_weights" ]; then
+    echo "(using Student model from loop ${PREV_LOOP} as filter)"
+    python3 docker/step_b_screening/screen_and_label.py \
+        --loop "${LOOP}" \
+        --provider student \
+        --model-dir "models/loop_${PREV_LOOP}" \
+        --base-model "${BASE_MODEL}" \
+        --generated-dir generated \
+        --output-dir screened
+else
+    echo "(using vLLM Teacher model — Student from previous loop not found)"
+    python3 docker/step_b_screening/screen_and_label.py \
+        --loop "${LOOP}" \
+        --provider vllm \
+        --config config/step_b.yaml \
+        --generated-dir generated \
+        --output-dir screened
+fi
 
-# ── Step C: Dataset Build ─────────────────────────────────────────────
+# ── Step C: Dataset Build (accumulate all prior loops) ────────────────
 echo ""
-echo "=== Step C: Dataset Build (loop ${LOOP}) ==="
+echo "=== Step C: Dataset Build (loop ${LOOP}, accumulate) ==="
 python3 scripts/build_dataset.py \
     --loop "${LOOP}" \
+    --accumulate \
     --screened-dir screened \
     --generated-dir generated \
     --output-dir dataset

@@ -9,22 +9,28 @@ from pathlib import Path
 
 
 TEACHER_SYSTEM_PROMPT = (
-    "You are a safety inspection assistant. "
-    "Look at the image and determine the helmet chinstrap status."
+    "You are a safety inspection assistant analyzing helmet images. "
+    "Base your classification only on what is visually observable in the image."
 )
 
 TEACHER_USER_PROMPT = (
-    "Determine if the helmet chinstrap in this image is tight or loose. "
-    "Respond ONLY in the following JSON format:\n"
-    '{"label": "tight" or "loose", "rationale": "<one sentence explaining visible evidence>"}'
+    "Inspect the helmet chinstrap in this image. "
+    "Describe exactly what you see for each of the following:\n"
+    "1. Chin-strap contact: is the strap touching the chin skin, or is there a visible gap?\n"
+    "2. Strap tension: does the strap appear taut and straight, or slack and drooping?\n"
+    "3. Buckle state: is the buckle fastened or unfastened?\n"
+    "4. Buckle position: is the buckle centered under the chin, or displaced to the side?\n"
+    "5. Strap shape: does the strap run straight from helmet to chin, or does it sag or curve?\n"
+    "After describing these observations, classify the chinstrap as tight or loose.\n"
+    'Respond ONLY in JSON: {"observation": "<your observations>", "label": "tight"|"loose"}'
 )
 
 LABEL_SCHEMA = {
     "type": "object",
-    "required": ["label", "rationale"],
+    "required": ["observation", "label"],
     "properties": {
+        "observation": {"type": "string"},
         "label": {"type": "string", "enum": ["tight", "loose"]},
-        "rationale": {"type": "string"},
     },
     "additionalProperties": False,
 }
@@ -49,8 +55,8 @@ def _build_messages(image_path: Path, rationale: bool = True) -> list[dict]:
         {
             "type": "text",
             "text": TEACHER_USER_PROMPT if rationale else (
-                "Determine if the helmet chinstrap in this image is tight or loose. "
-                'Respond ONLY in JSON: {"label": "tight" or "loose"}'
+                "Is the helmet chinstrap tight or loose? "
+                'Respond ONLY in JSON: {"label": "tight"|"loose"}'
             ),
         },
     ]
@@ -149,7 +155,7 @@ def run_teacher_inference(
             parsed = json.loads(text)
             results[image_id] = {
                 "label": parsed["label"],
-                "rationale": parsed.get("rationale", ""),
+                "observation": parsed.get("observation", ""),
             }
         except (json.JSONDecodeError, KeyError) as e:
             print(f"Warning: failed to parse output for {image_id}: {e}")

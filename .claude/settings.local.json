@@ -14,7 +14,9 @@
       "Bash(git -C /c/Users/user/Desktop/workplace/helmet_synth_data_training diff)",
       "Bash(git -C /c/Users/user/Desktop/workplace/helmet_synth_data_training log --oneline -10)",
       "Bash(git add:*)",
-      "Bash(git commit -m ':*)"
+      "Bash(git commit -m ':*)",
+      "Bash(ssh p968usug5dwu9c-64411b11@ssh.runpod.io -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \"echo connected && nvidia-smi && df -h / && ls ~/\")",
+      "Bash(git push:*)"
     ]
   }
 }

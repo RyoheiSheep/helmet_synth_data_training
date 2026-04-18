@@ -22,6 +22,23 @@ TEACHER_PROMPT = (
     '}'
 )
 
+# Must match the question strings in scripts/build_dataset.py (student was trained on these).
+_STUDENT_QUESTION_WITH_OBSERVATION = (
+    "Inspect the helmet chinstrap in this image. "
+    "Describe exactly what you see for each of the following:\n"
+    "1. Chin-strap contact: is the strap touching the chin skin, or is there a visible gap?\n"
+    "2. Strap tension: does the strap appear taut and straight, or slack and drooping?\n"
+    "3. Buckle state: is the buckle fastened or unfastened?\n"
+    "4. Buckle position: is the buckle centered under the chin, or displaced to the side?\n"
+    "5. Strap shape: does the strap run straight from helmet to chin, or does it sag or curve?\n"
+    "After describing these observations, classify the chinstrap as tight or loose.\n"
+    'Answer with JSON: {"observation": "<your observations>", "label": "tight"|"loose"}'
+)
+_STUDENT_QUESTION_LABEL_ONLY = (
+    'Is the helmet chinstrap tight or loose?\n'
+    'Answer with JSON: {"label": "tight"|"loose"}'
+)
+
 
 def load_meta(meta_path: Path) -> list[dict]:
     """Load meta.csv into a list of dicts."""
@@ -77,8 +94,8 @@ def screen_and_label(
 
         if keep:
             entry = {"image_id": image_id, "label": pred_label}
-            if rationale and "rationale" in teacher_pred:
-                entry["rationale"] = teacher_pred["rationale"]
+            if rationale and "observation" in teacher_pred:
+                entry["observation"] = teacher_pred["observation"]
             labeled_entries.append(entry)
 
     # Write screening.csv
@@ -120,9 +137,20 @@ def load_teacher_responses_from_jsonl(path: Path) -> dict[str, dict]:
             entry = json.loads(line)
             responses[entry["image_id"]] = {
                 "label": entry["label"],
-                "rationale": entry.get("rationale", ""),
+                "observation": entry.get("observation", ""),
             }
     return responses
+
+
+def _passthrough_responses(meta_path: Path) -> dict[str, dict]:
+    """Return seed labels directly without any VLM inference (Loop 1).
+
+    All generated images inherit their seed's label. No observation field is
+    included because no VLM was called — the screened labeled.jsonl for Loop 1
+    will contain only {image_id, label}.
+    """
+    meta_rows = load_meta(meta_path)
+    return {row["image_id"]: {"label": row["seed_label"]} for row in meta_rows}
 
 
 def _run_vllm_teacher(meta_path: Path, image_dir: Path, config: dict) -> dict[str, dict]:
@@ -149,6 +177,88 @@ def _run_vllm_teacher(meta_path: Path, image_dir: Path, config: dict) -> dict[st
     )
 
 
+def _run_student_inference(
+    meta_path: Path,
+    image_dir: Path,
+    model_dir: Path,
+    base_model: str,
+    rationale: bool = True,
+) -> dict[str, dict]:
+    """Run inference using the fine-tuned Student LoRA model. Deferred imports."""
+    import json as _json
+
+    import torch
+    from PIL import Image
+    from peft import PeftModel
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+
+    meta_rows = load_meta(meta_path)
+    lora_dir = model_dir / "lora_weights"
+    question = _STUDENT_QUESTION_WITH_OBSERVATION if rationale else _STUDENT_QUESTION_LABEL_ONLY
+
+    processor = AutoProcessor.from_pretrained(str(lora_dir))
+    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+    base = AutoModelForImageTextToText.from_pretrained(
+        base_model,
+        torch_dtype=dtype,
+        device_map="auto",
+    )
+    model = PeftModel.from_pretrained(base, str(lora_dir))
+    model.eval()
+
+    responses: dict[str, dict] = {}
+    for row in meta_rows:
+        image_id = row["image_id"]
+        image_path = image_dir / f"{image_id}.png"
+
+        try:
+            image = Image.open(image_path).convert("RGB")
+        except FileNotFoundError:
+            print(f"Warning: image not found for student inference: {image_path}")
+            continue
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": question},
+                ],
+            }
+        ]
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = processor(
+            text=[text], images=[image], return_tensors="pt"
+        ).to(model.device)
+
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs, max_new_tokens=256, do_sample=False
+            )
+
+        generated = processor.decode(
+            output_ids[0][inputs["input_ids"].shape[1]:],
+            skip_special_tokens=True,
+        )
+
+        try:
+            parsed = _json.loads(generated.strip())
+            label = parsed.get("label", "")
+            if label not in ("tight", "loose"):
+                print(f"Warning: invalid label '{label}' from student for {image_id}, skipping")
+                continue
+            responses[image_id] = {
+                "label": label,
+                "observation": parsed.get("observation", "") if rationale else "",
+            }
+        except _json.JSONDecodeError:
+            print(f"Warning: student output not valid JSON for {image_id}, skipping")
+
+    return responses
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Step B: Teacher Screening & Labeling"
@@ -157,9 +267,15 @@ def main():
     parser.add_argument(
         "--provider",
         type=str,
-        choices=["vllm", "precomputed"],
+        choices=["passthrough", "vllm", "precomputed", "student"],
         default="precomputed",
-        help="Teacher inference provider: 'vllm' for local GPU, 'precomputed' for JSONL",
+        help=(
+            "Inference provider: "
+            "'passthrough' to inherit seed labels with no VLM (loop 1), "
+            "'vllm' for Teacher GPU inference, "
+            "'precomputed' for JSONL fixture, "
+            "'student' for fine-tuned Student LoRA (loop 2+)"
+        ),
     )
     parser.add_argument(
         "--teacher-responses",
@@ -171,6 +287,16 @@ def main():
         type=str,
         default="config/step_b.yaml",
         help="Path to step_b.yaml (provider=vllm)",
+    )
+    parser.add_argument(
+        "--model-dir",
+        type=str,
+        help="Path to previous loop's model dir, e.g. models/loop_1 (provider=student)",
+    )
+    parser.add_argument(
+        "--base-model",
+        type=str,
+        help="HuggingFace base model ID used during fine-tuning (provider=student)",
     )
     parser.add_argument(
         "--no-rationale",
@@ -196,7 +322,9 @@ def main():
     image_dir = Path(args.generated_dir) / loop_name / "images"
     output_dir = Path(args.output_dir) / loop_name
 
-    if args.provider == "precomputed":
+    if args.provider == "passthrough":
+        teacher_responses = _passthrough_responses(meta_path)
+    elif args.provider == "precomputed":
         if not args.teacher_responses:
             raise ValueError(
                 "provider=precomputed requires --teacher-responses path"
@@ -209,6 +337,18 @@ def main():
         with open(args.config, "r") as f:
             config = yaml.safe_load(f)
         teacher_responses = _run_vllm_teacher(meta_path, image_dir, config)
+    elif args.provider == "student":
+        if not args.model_dir:
+            raise ValueError("provider=student requires --model-dir")
+        if not args.base_model:
+            raise ValueError("provider=student requires --base-model")
+        teacher_responses = _run_student_inference(
+            meta_path=meta_path,
+            image_dir=image_dir,
+            model_dir=Path(args.model_dir),
+            base_model=args.base_model,
+            rationale=not args.no_rationale,
+        )
     else:
         raise ValueError(f"Unknown provider: {args.provider}")
 

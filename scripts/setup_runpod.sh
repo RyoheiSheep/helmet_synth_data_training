@@ -29,7 +29,7 @@ python3 -m pip install --no-cache-dir \
     vllm \
     Pillow \
     pyyaml
-
+python3 -m pip install --upgrade transformers
 echo "=== [4/4] Verifying GPU ==="
 python3 -c "import torch; print(f'torch: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'GPU: {torch.cuda.get_device_name(0)}')"
 

@@ -126,7 +126,7 @@ class TestLabeledJSONL:
         for entry in entries:
             assert entry["label"] in ("tight", "loose")
 
-    def test_rationale_included_by_default(self, teacher_responses, output_dir):
+    def test_observation_included_by_default(self, teacher_responses, output_dir):
         screen_and_label(
             meta_path=FIXTURES / "meta.csv",
             teacher_responses=teacher_responses,
@@ -135,10 +135,10 @@ class TestLabeledJSONL:
         )
         entries = _load_jsonl(output_dir / "labeled.jsonl")
         for entry in entries:
-            assert "rationale" in entry
-            assert isinstance(entry["rationale"], str)
+            assert "observation" in entry
+            assert isinstance(entry["observation"], str)
 
-    def test_rationale_omitted_when_disabled(self, teacher_responses, output_dir):
+    def test_observation_omitted_when_disabled(self, teacher_responses, output_dir):
         screen_and_label(
             meta_path=FIXTURES / "meta.csv",
             teacher_responses=teacher_responses,
@@ -147,7 +147,7 @@ class TestLabeledJSONL:
         )
         entries = _load_jsonl(output_dir / "labeled.jsonl")
         for entry in entries:
-            assert "rationale" not in entry
+            assert "observation" not in entry
 
 
 class TestScreeningStats:

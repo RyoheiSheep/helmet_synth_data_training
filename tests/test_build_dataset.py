@@ -7,7 +7,7 @@ import pytest
 
 from scripts.build_dataset import (
     QUESTION_LABEL_ONLY,
-    QUESTION_WITH_RATIONALE,
+    QUESTION_WITH_OBSERVATION,
     build_dataset,
 )
 
@@ -44,10 +44,10 @@ class TestBuildDatasetWithRationale:
 
         for rec in records:
             assert set(rec.keys()) == {"image_path", "question", "answer"}
-            assert rec["question"] == QUESTION_WITH_RATIONALE
+            assert rec["question"] == QUESTION_WITH_OBSERVATION
             assert rec["answer"]["label"] in ("tight", "loose")
-            assert "rationale" in rec["answer"]
-            assert isinstance(rec["answer"]["rationale"], str)
+            assert "observation" in rec["answer"]
+            assert isinstance(rec["answer"]["observation"], str)
 
     def test_stats_json_fields(self, output_dir):
         stats = build_dataset(
@@ -135,3 +135,78 @@ class TestBuildDatasetEdgeCases:
         assert nested.exists()
         assert (nested / "train.jsonl").exists()
         assert (nested / "stats.json").exists()
+
+
+class TestBuildDatasetAccumulation:
+    """Tests for multi-loop data accumulation via prior_sources."""
+
+    def _make_prior_source(self, tmp_path: Path, name: str) -> tuple[Path, Path]:
+        """Create a minimal prior-loop labeled.jsonl + images dir."""
+        src_dir = tmp_path / name
+        images_dir = src_dir / "images"
+        images_dir.mkdir(parents=True)
+        jsonl = src_dir / "labeled.jsonl"
+        # No observation field: simulates passthrough (loop 1) data
+        entries = [
+            {"image_id": f"{name}_tight", "label": "tight"},
+            {"image_id": f"{name}_loose", "label": "loose"},
+        ]
+        with open(jsonl, "w") as f:
+            for e in entries:
+                f.write(json.dumps(e) + "\n")
+        for e in entries:
+            (images_dir / f"{e['image_id']}.png").write_bytes(b"\x89PNG")
+        return jsonl, images_dir
+
+    def test_accumulation_combines_all_loops(self, tmp_path):
+        """train.jsonl must contain samples from prior loops AND current loop."""
+        prior1_jsonl, prior1_images = self._make_prior_source(tmp_path, "loop_1")
+        prior2_jsonl, prior2_images = self._make_prior_source(tmp_path, "loop_2")
+        output_dir = tmp_path / "dataset_loop_3"
+
+        stats = build_dataset(
+            labeled_jsonl=FIXTURES / "labeled.jsonl",  # 5 current samples
+            image_dir=FIXTURES / "images",
+            output_dir=output_dir,
+            rationale=True,
+            prior_sources=[(prior1_jsonl, prior1_images), (prior2_jsonl, prior2_images)],
+        )
+
+        assert stats["total"] == 5 + 2 + 2  # current + loop_1 + loop_2
+        assert stats["tight_count"] + stats["loose_count"] == stats["total"]
+
+        records = _load_jsonl(output_dir / "train.jsonl")
+        assert len(records) == 9
+
+        image_paths = [r["image_path"] for r in records]
+        assert any("loop_1" in p for p in image_paths)
+        assert any("loop_2" in p for p in image_paths)
+
+    def test_no_prior_sources_behaves_like_single_loop(self, output_dir):
+        """Passing prior_sources=None must produce the same result as before."""
+        stats = build_dataset(
+            labeled_jsonl=FIXTURES / "labeled.jsonl",
+            image_dir=FIXTURES / "images",
+            output_dir=output_dir,
+            rationale=True,
+            prior_sources=None,
+        )
+        assert stats["total"] == 5
+
+    def test_prior_sources_order_preserved(self, tmp_path):
+        """Prior loop records must appear before current loop records in train.jsonl."""
+        prior_jsonl, prior_images = self._make_prior_source(tmp_path, "loop_1")
+        output_dir = tmp_path / "out"
+
+        build_dataset(
+            labeled_jsonl=FIXTURES / "labeled.jsonl",
+            image_dir=FIXTURES / "images",
+            output_dir=output_dir,
+            rationale=True,
+            prior_sources=[(prior_jsonl, prior_images)],
+        )
+
+        records = _load_jsonl(output_dir / "train.jsonl")
+        # Prior loop records come first
+        assert "loop_1" in records[0]["image_path"]
+        assert "loop_1" in records[1]["image_path"]
