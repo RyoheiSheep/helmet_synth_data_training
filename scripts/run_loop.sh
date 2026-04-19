@@ -11,6 +11,7 @@ set -euo pipefail
 LOOP=${1:?Usage: run_loop.sh <loop_number>}
 PREV_LOOP=$((LOOP - 1))
 BASE_MODEL=$(python3 -c "import yaml; c=yaml.safe_load(open('config/step_d.yaml')); print(c['base_model'])")
+STUDENT_BATCH_SIZE=${STUDENT_BATCH_SIZE:-4}
 
 echo "============================================"
 echo "  Loop ${LOOP} — full pipeline"
@@ -41,6 +42,7 @@ elif [ -d "models/loop_${PREV_LOOP}/lora_weights" ]; then
         --provider student \
         --model-dir "models/loop_${PREV_LOOP}" \
         --base-model "${BASE_MODEL}" \
+        --batch-size "${STUDENT_BATCH_SIZE}" \
         --generated-dir generated \
         --output-dir screened
 else

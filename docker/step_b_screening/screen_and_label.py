@@ -183,8 +183,9 @@ def _run_student_inference(
     model_dir: Path,
     base_model: str,
     rationale: bool = True,
+    batch_size: int = 4,
 ) -> dict[str, dict]:
-    """Run inference using the fine-tuned Student LoRA model. Deferred imports."""
+    """Run batched inference using the fine-tuned Student LoRA model. Deferred imports."""
     import json as _json
 
     import torch
@@ -197,6 +198,8 @@ def _run_student_inference(
     question = _STUDENT_QUESTION_WITH_OBSERVATION if rationale else _STUDENT_QUESTION_LABEL_ONLY
 
     processor = AutoProcessor.from_pretrained(str(lora_dir))
+    # Left-padding aligns all batch samples at the generation start point.
+    processor.tokenizer.padding_side = "left"
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
     base = AutoModelForImageTextToText.from_pretrained(
         base_model,
@@ -206,60 +209,77 @@ def _run_student_inference(
     model = PeftModel.from_pretrained(base, str(lora_dir))
     model.eval()
 
-    responses: dict[str, dict] = {}
+    # Pre-load all images; skip missing files up front.
+    valid_items: list[tuple[str, Image.Image]] = []
     for row in meta_rows:
         image_id = row["image_id"]
         image_path = image_dir / f"{image_id}.png"
-
         try:
-            image = Image.open(image_path).convert("RGB")
+            valid_items.append((image_id, Image.open(image_path).convert("RGB")))
         except FileNotFoundError:
             print(f"Warning: image not found for student inference: {image_path}")
-            continue
 
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image"},
-                    {"type": "text", "text": question},
-                ],
-            }
-        ]
-        text = processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+    responses: dict[str, dict] = {}
+    total = len(valid_items)
+
+    for batch_start in range(0, total, batch_size):
+        batch = valid_items[batch_start:batch_start + batch_size]
+        image_ids = [item[0] for item in batch]
+        images = [item[1] for item in batch]
+
+        texts = []
+        for _ in batch:
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image"},
+                        {"type": "text", "text": question},
+                    ],
+                }
+            ]
+            texts.append(
+                processor.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+            )
+
         inputs = processor(
-            text=[text], images=[image], return_tensors="pt"
+            text=texts,
+            images=images,
+            return_tensors="pt",
+            padding=True,
         ).to(model.device)
 
         with torch.no_grad():
-            output_ids = model.generate(
-                **inputs, max_new_tokens=256, do_sample=False
+            output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+
+        prompt_len = inputs["input_ids"].shape[1]
+        done = min(batch_start + batch_size, total)
+        print(f"Student inference: {done}/{total}", flush=True)
+
+        for i, image_id in enumerate(image_ids):
+            generated = processor.decode(
+                output_ids[i][prompt_len:],
+                skip_special_tokens=True,
             )
-
-        generated = processor.decode(
-            output_ids[0][inputs["input_ids"].shape[1]:],
-            skip_special_tokens=True,
-        )
-
-        try:
-            # Qwen3 models may prepend thinking tokens before the JSON object.
-            start = generated.find('{')
-            end = generated.rfind('}')
-            if start == -1 or end < start:
-                raise _json.JSONDecodeError("no JSON object found", generated, 0)
-            parsed = _json.loads(generated[start:end + 1])
-            label = parsed.get("label", "")
-            if label not in ("tight", "loose"):
-                print(f"Warning: invalid label '{label}' from student for {image_id}, skipping")
-                continue
-            responses[image_id] = {
-                "label": label,
-                "observation": parsed.get("observation", "") if rationale else "",
-            }
-        except _json.JSONDecodeError:
-            print(f"Warning: student output not valid JSON for {image_id}, skipping")
+            try:
+                # Qwen3 models may prepend thinking tokens before the JSON object.
+                start = generated.find('{')
+                end = generated.rfind('}')
+                if start == -1 or end < start:
+                    raise _json.JSONDecodeError("no JSON object found", generated, 0)
+                parsed = _json.loads(generated[start:end + 1])
+                label = parsed.get("label", "")
+                if label not in ("tight", "loose"):
+                    print(f"Warning: invalid label '{label}' from student for {image_id}, skipping")
+                    continue
+                responses[image_id] = {
+                    "label": label,
+                    "observation": parsed.get("observation", "") if rationale else "",
+                }
+            except _json.JSONDecodeError:
+                print(f"Warning: student output not valid JSON for {image_id}, skipping")
 
     return responses
 
@@ -302,6 +322,12 @@ def main():
         "--base-model",
         type=str,
         help="HuggingFace base model ID used during fine-tuning (provider=student)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Batch size for student model inference (provider=student)",
     )
     parser.add_argument(
         "--no-rationale",
@@ -353,6 +379,7 @@ def main():
             model_dir=Path(args.model_dir),
             base_model=args.base_model,
             rationale=not args.no_rationale,
+            batch_size=args.batch_size,
         )
     else:
         raise ValueError(f"Unknown provider: {args.provider}")
