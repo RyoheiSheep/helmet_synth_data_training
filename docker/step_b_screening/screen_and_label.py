@@ -244,7 +244,12 @@ def _run_student_inference(
         )
 
         try:
-            parsed = _json.loads(generated.strip())
+            # Qwen3 models may prepend thinking tokens before the JSON object.
+            start = generated.find('{')
+            end = generated.rfind('}')
+            if start == -1 or end < start:
+                raise _json.JSONDecodeError("no JSON object found", generated, 0)
+            parsed = _json.loads(generated[start:end + 1])
             label = parsed.get("label", "")
             if label not in ("tight", "loose"):
                 print(f"Warning: invalid label '{label}' from student for {image_id}, skipping")

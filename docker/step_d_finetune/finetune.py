@@ -41,7 +41,12 @@ def validate_dataset(samples: list[dict]) -> None:
 
 def format_answer(answer: dict) -> str:
     """Serialize an answer dict to the canonical JSON string the model must emit."""
-    # Keep key order stable: label first, rationale second if present.
+    if "observation" in answer:
+        # Match the question template key order: observation before label.
+        return json.dumps(
+            {"observation": answer["observation"], "label": answer["label"]},
+            ensure_ascii=False,
+        )
     ordered = {"label": answer["label"]}
     if "rationale" in answer:
         ordered["rationale"] = answer["rationale"]

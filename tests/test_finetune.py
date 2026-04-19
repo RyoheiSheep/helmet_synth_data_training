@@ -143,6 +143,12 @@ class TestFormatAnswer:
         keys = list(json.loads(out).keys())
         assert keys[0] == "label"
 
+    def test_observation_key(self):
+        out = format_answer({"observation": "strap is taut", "label": "tight"})
+        parsed = json.loads(out)
+        assert parsed == {"observation": "strap is taut", "label": "tight"}
+        assert list(parsed.keys())[0] == "observation"
+
 
 @pytest.mark.gpu
 class TestRunFinetuningGPU:
