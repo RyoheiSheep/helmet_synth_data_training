@@ -199,7 +199,10 @@ def _run_student_inference(
 
     processor = AutoProcessor.from_pretrained(str(lora_dir))
     # Left-padding aligns all batch samples at the generation start point.
+    # Some VL processors ignore the tokenizer's padding_side, so set both.
     processor.tokenizer.padding_side = "left"
+    if hasattr(processor, "padding_side"):
+        processor.padding_side = "left"
     dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
     base = AutoModelForImageTextToText.from_pretrained(
         base_model,
@@ -249,6 +252,7 @@ def _run_student_inference(
             images=images,
             return_tensors="pt",
             padding=True,
+            padding_side="left",
         ).to(model.device)
 
         with torch.no_grad():
@@ -263,23 +267,26 @@ def _run_student_inference(
                 output_ids[i][prompt_len:],
                 skip_special_tokens=True,
             )
+            if batch_start == 0:
+                print(f"  [debug] raw output for {image_id}: {generated[:300]!r}", flush=True)
+            start = generated.find('{')
+            end = generated.rfind('}')
+            if start == -1 or end < start:
+                print(f"Warning: no JSON object found for {image_id} (raw: {generated[:120]!r}), skipping")
+                continue
             try:
-                # Qwen3 models may prepend thinking tokens before the JSON object.
-                start = generated.find('{')
-                end = generated.rfind('}')
-                if start == -1 or end < start:
-                    raise _json.JSONDecodeError("no JSON object found", generated, 0)
                 parsed = _json.loads(generated[start:end + 1])
-                label = parsed.get("label", "")
-                if label not in ("tight", "loose"):
-                    print(f"Warning: invalid label '{label}' from student for {image_id}, skipping")
-                    continue
-                responses[image_id] = {
-                    "label": label,
-                    "observation": parsed.get("observation", "") if rationale else "",
-                }
             except _json.JSONDecodeError:
-                print(f"Warning: student output not valid JSON for {image_id}, skipping")
+                print(f"Warning: malformed JSON for {image_id} (raw: {generated[start:end+1][:120]!r}), skipping")
+                continue
+            label = parsed.get("label", "")
+            if label not in ("tight", "loose"):
+                print(f"Warning: invalid label '{label}' from student for {image_id}, skipping")
+                continue
+            responses[image_id] = {
+                "label": label,
+                "observation": parsed.get("observation", "") if rationale else "",
+            }
 
     return responses
 
