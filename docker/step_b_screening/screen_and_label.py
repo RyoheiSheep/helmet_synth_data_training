@@ -241,11 +241,16 @@ def _run_student_inference(
                     ],
                 }
             ]
-            texts.append(
-                processor.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
-                )
+            # Prefix-force the assistant response into a JSON object. The base
+            # model defaults to chain-of-thought and the LoRA is not strong
+            # enough to suppress it, so we pre-fill the first two tokens.
+            prompt_text = processor.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=False,
             )
+            texts.append(prompt_text + '{"')
 
         inputs = processor(
             text=texts,
@@ -256,7 +261,7 @@ def _run_student_inference(
         ).to(model.device)
 
         with torch.no_grad():
-            output_ids = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+            output_ids = model.generate(**inputs, max_new_tokens=512, do_sample=False)
 
         prompt_len = inputs["input_ids"].shape[1]
         done = min(batch_start + batch_size, total)
@@ -267,17 +272,20 @@ def _run_student_inference(
                 output_ids[i][prompt_len:],
                 skip_special_tokens=True,
             )
+            # Prepend the forced prefix so the model's continuation becomes
+            # a complete JSON object.
+            full_output = '{"' + generated
             if batch_start == 0:
-                print(f"  [debug] raw output for {image_id}: {generated[:300]!r}", flush=True)
-            start = generated.find('{')
-            end = generated.rfind('}')
+                print(f"  [debug] raw output for {image_id}: {full_output[:300]!r}", flush=True)
+            start = full_output.find('{')
+            end = full_output.rfind('}')
             if start == -1 or end < start:
-                print(f"Warning: no JSON object found for {image_id} (raw: {generated[:120]!r}), skipping")
+                print(f"Warning: no JSON object found for {image_id} (raw: {full_output[:120]!r}), skipping")
                 continue
             try:
-                parsed = _json.loads(generated[start:end + 1])
+                parsed = _json.loads(full_output[start:end + 1])
             except _json.JSONDecodeError:
-                print(f"Warning: malformed JSON for {image_id} (raw: {generated[start:end+1][:120]!r}), skipping")
+                print(f"Warning: malformed JSON for {image_id} (raw: {full_output[start:end+1][:120]!r}), skipping")
                 continue
             label = parsed.get("label", "")
             if label not in ("tight", "loose"):
