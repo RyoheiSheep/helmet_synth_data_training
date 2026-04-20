@@ -11,4 +11,4 @@ api:
   num_inference_steps: 50
   guidance_scale: 4.0
   output_format: "png"                           # png / jpeg
-  batch_size: 4                                  # images per pipeline call; increase to 4-8 on high-VRAM GPUs
+  batch_size: 8                                  # images per pipeline call; tuned for 48GB GPU (no CPU offload)

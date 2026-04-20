@@ -143,7 +143,7 @@ def _load_diffusers_pipeline(model_id: str):
         model_id,
         torch_dtype=torch.bfloat16,
     )
-    pipe.enable_model_cpu_offload()
+    pipe.to("cuda")
     return pipe
 
 
