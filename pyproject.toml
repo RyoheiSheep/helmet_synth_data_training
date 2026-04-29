@@ -11,6 +11,9 @@ dependencies = [
 dev = [
     "pytest",
 ]
+data = [
+    "boto3",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

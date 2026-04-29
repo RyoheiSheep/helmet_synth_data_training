@@ -12,10 +12,10 @@ generated/loop_*/
 screened/loop_*/
 dataset/loop_*/
 models/loop_*/
-# seeds/images/*.png
+# seeds/images/*.png  # kept versioned: seed images are real training data
 # seeds/images/*.jpg
-# # eval/test_real/*.png
-# eval/test_real/*.jpg
+eval/test_real/images/*.png
+eval/test_real/images/*.jpg
 # eval/val_generated/*.png
 # eval/val_generated/*.jpg
 # eval/edge_cases/*.png
