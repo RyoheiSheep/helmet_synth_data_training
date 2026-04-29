@@ -73,6 +73,24 @@ Goal: complete ONE real loop end-to-end with actual seeds, real Teacher VLM, rea
 | 1.A.3 | Collect ≥50 real test images | 🟡 | `eval/test_real/images/` (8 images), `eval/test_real/labels.csv` | Real-environment photos, NOT from seeds; hand-labeled. Currently 8, target ≥50. Enough for smoke test. |
 | 1.A.4 | Collect ≥20 edge-case images | 🟡 | `eval/edge_cases/images/` (4 images), `eval/edge_cases/labels.csv` | Half-fastened, chin tucked, backlit, etc. Currently 4, target ≥20. Enough for smoke test. |
 | 1.A.5 | Decide on val_generated strategy | ⬜ | `eval/val_generated/` | Design says 10–20/loop with hand labels. Decide: annotate a sample of Step A output per loop? |
+| 1.A.6 | Cloudflare R2 fetch script | ✅ | [scripts/fetch_data.py](scripts/fetch_data.py), [tests/test_fetch_data.py](tests/test_fetch_data.py) | Pulls `train_dataset.tar` and `test_dataset.tar` from a private R2 bucket. Train **merges** into `seeds/` (collision = abort). Test **replaces** `eval/test_real/`. Wired into [scripts/setup_runpod.sh](scripts/setup_runpod.sh) step [5/5]. 9 unit tests cover replace/merge/collision/path-traversal. |
+
+**Data acquisition workflow**
+
+1. Stage the tarballs in Cloudflare R2. Each must contain `images/` and `labels.csv` at the archive root, with `image_id,label` columns and `label ∈ {tight, loose}`.
+2. Export R2 credentials in the shell where setup runs:
+   ```bash
+   export CLOUDFLARE_R2_ACCOUNT_ID=...
+   export CLOUDFLARE_R2_ACCESS_KEY_ID=...
+   export CLOUDFLARE_R2_SECRET_ACCESS_KEY=...
+   export CLOUDFLARE_R2_BUCKET=...
+   ```
+3. Run `bash scripts/setup_runpod.sh` (auto-fetches in step [5/5]) **or** fetch on demand:
+   ```bash
+   uv sync --extra data        # installs boto3 (only when fetching)
+   uv run python scripts/fetch_data.py --split both
+   ```
+4. Avoiding `image_id` collisions: train tarball entries are merged into `seeds/labels.csv`, so any new `image_id` must not duplicate an existing one in `seeds/`. The script aborts with the colliding IDs listed; rename upstream and retry.
 
 ### 1.B Step D — real LoRA fine-tuning ✅ (code) / ⬜ (GPU verification)
 
@@ -191,3 +209,4 @@ Phase 4 items are explicitly out of scope for v0.3.
 - **2026-04-09** — PLAN.md created. Phase 0 marked complete (55 tests passing, all dummy/dry-run backends working). Phase 1 broken into A–F sub-phases. Identified missing Step D Dockerfile/requirements and missing predict.py as the two biggest code gaps.
 - **2026-04-11** — Phase 1.B (code) and 1.C completed. Step D: real LoRA training loop (`_run_live_training`, `_build_collator`, `format_answer`), Dockerfile + pinned requirements. predict.py: dummy + vLLM providers, 10 unit tests, wired into system test. 72 tests passing. Remaining blockers: data acquisition (1.A) and GPU smoke tests (1.B.4, 1.D, 1.E).
 - **2026-04-12** — Seed data acquired (33 images: 15 tight, 18 loose). Eval data acquired (test_real: 8, edge_cases: 4) — below design targets but sufficient for smoke tests. Added `addopts = "-m 'not gpu'"` to pyproject.toml so GPU tests are skipped by default. Added eval directory scaffolding (images/, labels.csv). GPU environment decided: **RunPod 1× A40 48 GB** ($0.35/hr) — cheapest option that fits all steps (Step B uses FP8 quantization for 27B Teacher).
+- **2026-04-29** — Added Cloudflare R2 data fetch (`scripts/fetch_data.py`, 9 tests). Train tarball merges into `seeds/` (real seeds stay versioned); test tarball replaces `eval/test_real/` (placeholders gitignored). Wired into `scripts/setup_runpod.sh` as step [5/5], gated on `CLOUDFLARE_R2_*` env vars. New `data` extras group in `pyproject.toml` keeps `boto3` out of the default test venv.

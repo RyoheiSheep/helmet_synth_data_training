@@ -136,6 +136,13 @@ uv run pytest
 uv run python scripts/build_dataset.py --loop 1
 uv run python scripts/evaluate.py --predictions eval/loop_1.jsonl
 
+# Fetch dataset from Cloudflare R2 (requires data extras + 4 env vars)
+uv sync --extra data
+export CLOUDFLARE_R2_ACCOUNT_ID=... CLOUDFLARE_R2_ACCESS_KEY_ID=... \
+       CLOUDFLARE_R2_SECRET_ACCESS_KEY=... CLOUDFLARE_R2_BUCKET=...
+uv run python scripts/fetch_data.py --split both   # train→seeds/ (merge), test→eval/test_real/ (replace)
+# Or run scripts/setup_runpod.sh which auto-fetches in step [5/5] when env vars are set.
+
 # Docker (GPU required for real runs)
 docker compose build step_a step_b step_d
 LOOP_NUM=1 docker compose run --rm step_a
