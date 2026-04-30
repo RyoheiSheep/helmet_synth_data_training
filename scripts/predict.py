@@ -83,21 +83,22 @@ def predict_dummy(
 
 def predict_transformers(
     eval_entries: list[dict],
-    model_dir: Path,
+    model_dir: Path | None = None,
     base_model: str = "Qwen/Qwen3.5-9B",
     max_new_tokens: int = 256,
     temperature: float = 0.0,
     batch_size: int = 8,
 ) -> list[dict]:
-    """Run inference using HuggingFace Transformers + PEFT LoRA adapter.
+    """Run inference using HuggingFace Transformers, optionally with a LoRA adapter.
 
-    Mirrors the loading path used in [docker/step_d_finetune/finetune.py] so the
-    adapter is consumed exactly the way it was trained. Use this provider when
-    vLLM does not register the base model architecture.
+    When `model_dir` is provided, mirrors the loading path used in
+    [docker/step_d_finetune/finetune.py] so the adapter is consumed exactly the
+    way it was trained. When `model_dir` is None, the base model is run without
+    any adapter — useful for measuring a pre-fine-tune baseline.
 
     Performance:
-      - LoRA is merged into the base weights (`merge_and_unload`) to remove
-        per-step PEFT overhead.
+      - LoRA (when present) is merged into the base weights (`merge_and_unload`)
+        to remove per-step PEFT overhead.
       - Flash Attention 2 is enabled when available; falls back silently.
       - Inputs are processed in batches with left-padding so all rows can be
         decoded with one slice.
@@ -108,9 +109,7 @@ def predict_transformers(
     import torch
     from PIL import Image
     from transformers import AutoModelForImageTextToText, AutoProcessor
-    from peft import PeftModel
 
-    lora_dir = model_dir / "lora_weights"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cpu":
         print("[predict] WARNING: no CUDA device detected, running on CPU.")
@@ -137,10 +136,16 @@ def predict_transformers(
             trust_remote_code=True,
         )
 
-    model = PeftModel.from_pretrained(model, str(lora_dir))
-    # Collapse LoRA matrices into the base weights so generate() runs without
-    # PEFT's per-layer hook overhead.
-    model = model.merge_and_unload()
+    if model_dir is not None:
+        from peft import PeftModel
+        lora_dir = model_dir / "lora_weights"
+        model = PeftModel.from_pretrained(model, str(lora_dir))
+        # Collapse LoRA matrices into the base weights so generate() runs
+        # without PEFT's per-layer hook overhead.
+        model = model.merge_and_unload()
+        print(f"[predict] loaded LoRA adapter from {lora_dir}")
+    else:
+        print("[predict] no model_dir given — running base model (baseline)")
     model.to(device)
     model.eval()
 
@@ -333,8 +338,7 @@ def run_prediction(
             eval_entries, model_dir=model_dir, base_model=base_model
         )
     elif provider == "transformers":
-        if model_dir is None:
-            raise ValueError("provider=transformers requires --model-dir")
+        # model_dir is optional: omit to evaluate the base model (baseline).
         predictions = predict_transformers(
             eval_entries,
             model_dir=model_dir,
@@ -371,7 +375,8 @@ def main():
     )
     parser.add_argument(
         "--model-dir", type=str, default=None,
-        help="Path to models/loop_{N}/ (vllm/transformers provider)",
+        help="Path to models/loop_{N}/ — required for vllm; optional for "
+             "transformers (omit to evaluate the base model as a baseline)",
     )
     parser.add_argument(
         "--base-model", type=str, default="Qwen/Qwen3.5-9B",

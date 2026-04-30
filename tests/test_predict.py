@@ -127,12 +127,3 @@ class TestRunPrediction:
                 provider="vllm",
                 model_dir=None,
             )
-
-    def test_transformers_without_model_dir_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="requires --model-dir"):
-            run_prediction(
-                eval_dir=FIXTURES,
-                output_path=tmp_path / "out.jsonl",
-                provider="transformers",
-                model_dir=None,
-            )
