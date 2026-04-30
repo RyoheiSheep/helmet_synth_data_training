@@ -86,13 +86,22 @@ def predict_transformers(
     model_dir: Path,
     base_model: str = "Qwen/Qwen3.5-9B",
     max_new_tokens: int = 256,
-    temperature: float = 0.1,
+    temperature: float = 0.0,
+    batch_size: int = 8,
 ) -> list[dict]:
     """Run inference using HuggingFace Transformers + PEFT LoRA adapter.
 
     Mirrors the loading path used in [docker/step_d_finetune/finetune.py] so the
     adapter is consumed exactly the way it was trained. Use this provider when
     vLLM does not register the base model architecture.
+
+    Performance:
+      - LoRA is merged into the base weights (`merge_and_unload`) to remove
+        per-step PEFT overhead.
+      - Flash Attention 2 is enabled when available; falls back silently.
+      - Inputs are processed in batches with left-padding so all rows can be
+        decoded with one slice.
+      - `temperature=0` selects greedy decoding (fastest, deterministic).
 
     Heavy imports are deferred so tests don't need GPU/torch.
     """
@@ -107,32 +116,58 @@ def predict_transformers(
         print("[predict] WARNING: no CUDA device detected, running on CPU.")
 
     processor = AutoProcessor.from_pretrained(base_model, trust_remote_code=True)
-    model = AutoModelForImageTextToText.from_pretrained(
-        base_model,
-        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
-        trust_remote_code=True,
-    )
+    # Left padding is required so all sequences in a batch align at the right
+    # edge — then `output_ids[:, prompt_len:]` slices new tokens for every row.
+    processor.tokenizer.padding_side = "left"
+
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
+    try:
+        model = AutoModelForImageTextToText.from_pretrained(
+            base_model,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+            attn_implementation="flash_attention_2",
+        )
+        print("[predict] using flash_attention_2")
+    except (ValueError, ImportError, RuntimeError) as e:
+        print(f"[predict] flash_attention_2 unavailable ({e}); using default attention")
+        model = AutoModelForImageTextToText.from_pretrained(
+            base_model,
+            torch_dtype=dtype,
+            trust_remote_code=True,
+        )
+
     model = PeftModel.from_pretrained(model, str(lora_dir))
+    # Collapse LoRA matrices into the base weights so generate() runs without
+    # PEFT's per-layer hook overhead.
+    model = model.merge_and_unload()
     model.to(device)
     model.eval()
 
-    predictions = []
-    for entry in eval_entries:
-        image = Image.open(entry["image_path"]).convert("RGB")
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "image"},
-                    {"type": "text", "text": QUESTION_WITH_RATIONALE},
-                ],
-            },
+    predictions: list[dict] = []
+    for start in range(0, len(eval_entries), batch_size):
+        batch = eval_entries[start:start + batch_size]
+        images = [Image.open(e["image_path"]).convert("RGB") for e in batch]
+        texts = [
+            processor.apply_chat_template(
+                [{
+                    "role": "user",
+                    "content": [
+                        {"type": "image"},
+                        {"type": "text", "text": QUESTION_WITH_RATIONALE},
+                    ],
+                }],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for _ in batch
         ]
-        text = processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+
         inputs = processor(
-            text=[text], images=[image], return_tensors="pt", padding=True
+            text=texts,
+            images=images,
+            return_tensors="pt",
+            padding=True,
         ).to(device)
 
         with torch.no_grad():
@@ -144,27 +179,29 @@ def predict_transformers(
             )
 
         prompt_len = inputs["input_ids"].shape[1]
-        new_tokens = output_ids[0, prompt_len:]
-        text_out = processor.tokenizer.decode(
+        new_tokens = output_ids[:, prompt_len:]
+        decoded = processor.tokenizer.batch_decode(
             new_tokens, skip_special_tokens=True
-        ).strip()
+        )
 
-        try:
-            parsed = json.loads(text_out)
-            pred_label = parsed["label"]
-            if pred_label not in ("tight", "loose"):
-                raise ValueError(f"invalid label: {pred_label!r}")
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            print(
-                f"Warning: unparseable output for {entry['image_id']} "
-                f"({e}): {text_out!r}"
-            )
-            continue
-        predictions.append({
-            "image_id": entry["image_id"],
-            "label": pred_label,
-            "ground_truth": entry["label"],
-        })
+        for entry, text_out in zip(batch, decoded):
+            text_out = text_out.strip()
+            try:
+                parsed = json.loads(text_out)
+                pred_label = parsed["label"]
+                if pred_label not in ("tight", "loose"):
+                    raise ValueError(f"invalid label: {pred_label!r}")
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                print(
+                    f"Warning: unparseable output for {entry['image_id']} "
+                    f"({e}): {text_out!r}"
+                )
+                continue
+            predictions.append({
+                "image_id": entry["image_id"],
+                "label": pred_label,
+                "ground_truth": entry["label"],
+            })
     return predictions
 
 
@@ -260,6 +297,7 @@ def run_prediction(
     provider: str = "dummy",
     model_dir: Path | None = None,
     base_model: str = "Qwen/Qwen3.5-9B",
+    batch_size: int = 8,
     dummy_accuracy: float = 0.8,
     dummy_seed: int = 42,
 ) -> list[dict]:
@@ -268,9 +306,10 @@ def run_prediction(
     Args:
         eval_dir: Directory with labels.csv + images/.
         output_path: Where to write predictions JSONL.
-        provider: "dummy" or "vllm".
-        model_dir: Path to models/loop_{N}/ (required for vllm provider).
-        base_model: HuggingFace base model ID (vllm provider).
+        provider: "dummy", "vllm", or "transformers".
+        model_dir: Path to models/loop_{N}/ (required for vllm/transformers).
+        base_model: HuggingFace base model ID (vllm/transformers).
+        batch_size: Mini-batch size (transformers provider).
         dummy_accuracy: Simulated accuracy (dummy provider).
         dummy_seed: Random seed (dummy provider).
 
@@ -293,7 +332,10 @@ def run_prediction(
         if model_dir is None:
             raise ValueError("provider=transformers requires --model-dir")
         predictions = predict_transformers(
-            eval_entries, model_dir=model_dir, base_model=base_model
+            eval_entries,
+            model_dir=model_dir,
+            base_model=base_model,
+            batch_size=batch_size,
         )
     else:
         raise ValueError(f"Unknown provider: {provider}")
@@ -332,6 +374,10 @@ def main():
         help="Base model ID (vllm/transformers provider)",
     )
     parser.add_argument(
+        "--batch-size", type=int, default=8,
+        help="Mini-batch size (transformers provider; lower if OOM)",
+    )
+    parser.add_argument(
         "--dummy-accuracy", type=float, default=0.8,
         help="Simulated accuracy (dummy provider)",
     )
@@ -347,6 +393,7 @@ def main():
         provider=args.provider,
         model_dir=Path(args.model_dir) if args.model_dir else None,
         base_model=args.base_model,
+        batch_size=args.batch_size,
         dummy_accuracy=args.dummy_accuracy,
         dummy_seed=args.dummy_seed,
     )
