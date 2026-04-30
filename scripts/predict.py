@@ -159,6 +159,10 @@ def predict_transformers(
                 }],
                 tokenize=False,
                 add_generation_prompt=True,
+                # Qwen3.5 emits a <think> reasoning trace by default; disable
+                # so the model goes straight to the JSON answer (matches the
+                # screening config in config/step_b.yaml).
+                enable_thinking=False,
             )
             for _ in batch
         ]
@@ -398,9 +402,12 @@ def main():
         dummy_seed=args.dummy_seed,
     )
 
-    correct = sum(1 for p in predictions if p["label"] == p["ground_truth"])
     total = len(predictions)
-    print(f"Predictions: {correct}/{total} correct ({correct/total:.2%})")
+    if total == 0:
+        print("Predictions: 0 parsed (all outputs unparseable — see warnings above)")
+    else:
+        correct = sum(1 for p in predictions if p["label"] == p["ground_truth"])
+        print(f"Predictions: {correct}/{total} correct ({correct/total:.2%})")
 
 
 if __name__ == "__main__":
