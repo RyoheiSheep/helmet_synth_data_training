@@ -81,6 +81,93 @@ def predict_dummy(
     return predictions
 
 
+def predict_transformers(
+    eval_entries: list[dict],
+    model_dir: Path,
+    base_model: str = "Qwen/Qwen3.5-9B",
+    max_new_tokens: int = 256,
+    temperature: float = 0.1,
+) -> list[dict]:
+    """Run inference using HuggingFace Transformers + PEFT LoRA adapter.
+
+    Mirrors the loading path used in [docker/step_d_finetune/finetune.py] so the
+    adapter is consumed exactly the way it was trained. Use this provider when
+    vLLM does not register the base model architecture.
+
+    Heavy imports are deferred so tests don't need GPU/torch.
+    """
+    import torch
+    from PIL import Image
+    from transformers import AutoModelForImageTextToText, AutoProcessor
+    from peft import PeftModel
+
+    lora_dir = model_dir / "lora_weights"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu":
+        print("[predict] WARNING: no CUDA device detected, running on CPU.")
+
+    processor = AutoProcessor.from_pretrained(base_model, trust_remote_code=True)
+    model = AutoModelForImageTextToText.from_pretrained(
+        base_model,
+        torch_dtype=torch.bfloat16 if device == "cuda" else torch.float32,
+        trust_remote_code=True,
+    )
+    model = PeftModel.from_pretrained(model, str(lora_dir))
+    model.to(device)
+    model.eval()
+
+    predictions = []
+    for entry in eval_entries:
+        image = Image.open(entry["image_path"]).convert("RGB")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": QUESTION_WITH_RATIONALE},
+                ],
+            },
+        ]
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = processor(
+            text=[text], images=[image], return_tensors="pt", padding=True
+        ).to(device)
+
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                do_sample=temperature > 0,
+            )
+
+        prompt_len = inputs["input_ids"].shape[1]
+        new_tokens = output_ids[0, prompt_len:]
+        text_out = processor.tokenizer.decode(
+            new_tokens, skip_special_tokens=True
+        ).strip()
+
+        try:
+            parsed = json.loads(text_out)
+            pred_label = parsed["label"]
+            if pred_label not in ("tight", "loose"):
+                raise ValueError(f"invalid label: {pred_label!r}")
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            print(
+                f"Warning: unparseable output for {entry['image_id']} "
+                f"({e}): {text_out!r}"
+            )
+            continue
+        predictions.append({
+            "image_id": entry["image_id"],
+            "label": pred_label,
+            "ground_truth": entry["label"],
+        })
+    return predictions
+
+
 def predict_vllm(
     eval_entries: list[dict],
     model_dir: Path,
@@ -202,6 +289,12 @@ def run_prediction(
         predictions = predict_vllm(
             eval_entries, model_dir=model_dir, base_model=base_model
         )
+    elif provider == "transformers":
+        if model_dir is None:
+            raise ValueError("provider=transformers requires --model-dir")
+        predictions = predict_transformers(
+            eval_entries, model_dir=model_dir, base_model=base_model
+        )
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -226,16 +319,17 @@ def main():
         help="Path to write predictions JSONL",
     )
     parser.add_argument(
-        "--provider", type=str, choices=["dummy", "vllm"], default="dummy",
+        "--provider", type=str,
+        choices=["dummy", "vllm", "transformers"], default="dummy",
         help="Inference provider",
     )
     parser.add_argument(
         "--model-dir", type=str, default=None,
-        help="Path to models/loop_{N}/ (vllm provider)",
+        help="Path to models/loop_{N}/ (vllm/transformers provider)",
     )
     parser.add_argument(
         "--base-model", type=str, default="Qwen/Qwen3.5-9B",
-        help="Base model ID (vllm provider)",
+        help="Base model ID (vllm/transformers provider)",
     )
     parser.add_argument(
         "--dummy-accuracy", type=float, default=0.8,
