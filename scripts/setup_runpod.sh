@@ -34,16 +34,16 @@ echo "=== [3/5] Installing GPU dependencies ==="
 # the RunPod host driver (driver 12.8 -> needs cu128 or older).
 python3 -m pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
-    "torch==2.7.1" \
-    git+https://github.com/huggingface/diffusers.git \
-    transformers \
-    accelerate \
-    sentencepiece \
-    peft \
-    datasets \
-    vllm \
-    Pillow \
-    pyyaml
+    "torch==2.8.0" \
+    git+https://github.com/huggingface/diffusers.git@2173c554ea557f40108a7af6175729f334afef26 \
+    "transformers==5.7.0" \
+    "accelerate==1.13.0" \
+    "sentencepiece==0.2.1" \
+    "peft==0.19.1" \
+    "datasets==4.8.5" \
+    "vllm==0.11.0" \
+    "Pillow==12.2.0" \
+    "pyyaml==6.0.2"
 
 echo "=== [4/5] Verifying GPU ==="
 python3 - << 'EOF'
