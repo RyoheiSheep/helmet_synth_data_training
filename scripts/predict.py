@@ -176,8 +176,14 @@ def predict_vllm(
     max_model_len: int = 4096,
     temperature: float = 0.1,
     max_tokens: int = 256,
+    model_impl: str = "auto",
 ) -> list[dict]:
     """Run inference using vLLM with a LoRA adapter.
+
+    Set `model_impl="transformers"` to use vLLM's HF-Transformers fallback
+    backend — required when the architecture is not in vLLM's native registry
+    (e.g. Qwen3.5). The fallback still gets paged KV cache and batched
+    scheduling.
 
     Heavy imports are deferred so tests don't need GPU/vllm.
     """
@@ -202,13 +208,16 @@ def predict_vllm(
     # All eval images live under one directory; use the common parent.
     allowed_media_path = str(image_paths[0].parent) if len(image_dirs) == 1 else str(image_paths[0].parents[1])
 
-    llm = LLM(
-        model=base_model,
-        enable_lora=True,
-        tensor_parallel_size=tensor_parallel_size,
-        max_model_len=max_model_len,
-        allowed_local_media_path=allowed_media_path,
-    )
+    llm_kwargs = {
+        "model": base_model,
+        "enable_lora": True,
+        "tensor_parallel_size": tensor_parallel_size,
+        "max_model_len": max_model_len,
+        "allowed_local_media_path": allowed_media_path,
+    }
+    if model_impl != "auto":
+        llm_kwargs["model_impl"] = model_impl
+    llm = LLM(**llm_kwargs)
 
     from vllm.lora.request import LoRARequest
     lora_request = LoRARequest("helmet_lora", 1, str(lora_dir))
@@ -260,6 +269,7 @@ def run_prediction(
     provider: str = "dummy",
     model_dir: Path | None = None,
     base_model: str = "Qwen/Qwen3.5-9B",
+    model_impl: str = "auto",
     dummy_accuracy: float = 0.8,
     dummy_seed: int = 42,
 ) -> list[dict]:
@@ -268,9 +278,10 @@ def run_prediction(
     Args:
         eval_dir: Directory with labels.csv + images/.
         output_path: Where to write predictions JSONL.
-        provider: "dummy" or "vllm".
-        model_dir: Path to models/loop_{N}/ (required for vllm provider).
-        base_model: HuggingFace base model ID (vllm provider).
+        provider: "dummy", "vllm", or "transformers".
+        model_dir: Path to models/loop_{N}/ (required for vllm/transformers).
+        base_model: HuggingFace base model ID (vllm/transformers).
+        model_impl: vLLM model backend — "auto" or "transformers" (HF fallback).
         dummy_accuracy: Simulated accuracy (dummy provider).
         dummy_seed: Random seed (dummy provider).
 
@@ -287,7 +298,10 @@ def run_prediction(
         if model_dir is None:
             raise ValueError("provider=vllm requires --model-dir")
         predictions = predict_vllm(
-            eval_entries, model_dir=model_dir, base_model=base_model
+            eval_entries,
+            model_dir=model_dir,
+            base_model=base_model,
+            model_impl=model_impl,
         )
     elif provider == "transformers":
         if model_dir is None:
@@ -332,6 +346,12 @@ def main():
         help="Base model ID (vllm/transformers provider)",
     )
     parser.add_argument(
+        "--model-impl", type=str,
+        choices=["auto", "transformers"], default="auto",
+        help="vLLM backend: 'auto' (native) or 'transformers' (HF fallback "
+             "for architectures not in vLLM's registry, e.g. Qwen3.5)",
+    )
+    parser.add_argument(
         "--dummy-accuracy", type=float, default=0.8,
         help="Simulated accuracy (dummy provider)",
     )
@@ -347,6 +367,7 @@ def main():
         provider=args.provider,
         model_dir=Path(args.model_dir) if args.model_dir else None,
         base_model=args.base_model,
+        model_impl=args.model_impl,
         dummy_accuracy=args.dummy_accuracy,
         dummy_seed=args.dummy_seed,
     )
